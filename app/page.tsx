@@ -3,25 +3,20 @@
 import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-// 1. 先把 Vercel 里的值拿出来
-let supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-let supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+// 1. 读取变量（变量名已统一且唯一）
+let rawUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+let rawKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-// 2. 【核武器级拦截】：只要它不是以 http 开头（无论是空格、乱码还是空串），统统强制替换！
-if (!supabaseUrl.startsWith('http')) {
-  supabaseUrl = 'https://placeholder.supabase.co';
+// 2. 强力防御空值或空格导致的崩溃：如果格式不满足 http 开头，直接拦截改用占位符
+if (!rawUrl || !rawUrl.trim().startsWith('http')) {
+  rawUrl = 'https://placeholder.supabase.co';
 }
-if (!supabaseAnonKey) {
-  supabaseAnonKey = 'placeholder-key';
+if (!rawKey || !rawKey.trim()) {
+  rawKey = 'placeholder-key';
 }
 
-// 3. 安全初始化
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
-// 初始化 Supabase 客户端 (给一个合法的占位符，防止打包阶段崩溃)
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
+// 3. 干净唯一的初始化，绝无任何重复声明
+const supabase = createClient(rawUrl, rawKey);
 
 export default function Home() {
   const [items, setItems] = useState<any[]>([]);
@@ -34,7 +29,7 @@ export default function Home() {
   const [selectedStatus, setSelectedStatus] = useState('ALL');
   const [itemsPerPage, setItemsPerPage] = useState(100);
 
-  // 1. 从 Supabase 获取数据并进行【智能分类纠错】
+  // 从 Supabase 获取数据并进行智能分类纠错
   useEffect(() => {
     async function fetchData() {
       try {
@@ -46,7 +41,6 @@ export default function Home() {
         if (dbError) throw dbError;
 
         if (data) {
-          // 💡 智能分类纠错器 (完美平移 Python 逻辑)
           const processedData = data.map((item: any) => {
             let subCat = String(item['中分類'] || '');
             const title = `${item['特徴'] || ''} ${item['商品名'] || ''}`;
@@ -87,15 +81,15 @@ export default function Home() {
       }
     }
 
-    if (supabaseUrl && supabaseAnonKey) {
+    // 判断是否在用假链接，如果用的是真链接才发请求
+    if (rawUrl && rawKey && !rawUrl.includes('placeholder')) {
       fetchData();
     } else {
-      setError('Supabaseの認証キーが設定されていません。.env.local を確認してください。');
+      setError('Supabaseの認証キーが設定されていません。Vercel の Environment Variables を確認してください。');
       setLoading(false);
     }
   }, []);
 
-  // 2. 辅助函数：格式化日元价格
   const formatPrice = (val: any) => {
     if (!val) return '-';
     const cleanVal = String(val).replace('¥', '').replace(/,/g, '').trim();
@@ -103,26 +97,18 @@ export default function Home() {
     return !isNaN(num) ? `¥${Math.floor(num).toLocaleString()}` : '-';
   };
 
-  // 获取所有非空分类，供筛选下拉框使用
   const categories = ['ALL', ...Array.from(new Set(items.map(i => i['中分類']).filter(Boolean))).sort()];
 
-  // 3. 核心过滤逻辑 (支持搜索、分类筛选、状态模糊匹配)
   const filteredItems = items.filter(item => {
-    // 搜索过滤: 支持跨字段检索（箱番、ブランド、特徴、出品者等全部转为字符串匹配）
     const searchString = `${item['ブランド']} ${item['特徴']} ${item['中分類']} ${item['箱番']} ${item['商品番号']} ${item['出品者']}`.toLowerCase();
     const matchesSearch = searchString.includes(searchTerm.toLowerCase());
-
-    // 分类过滤
     const matchesCategory = selectedCategory === 'ALL' || item['中分類'] === selectedCategory;
-
-    // 状态过滤 (模糊包含匹配)
     const itemStatus = String(item['状態詳細'] || '');
     const matchesStatus = selectedStatus === 'ALL' || itemStatus.toLowerCase().includes(selectedStatus.toLowerCase());
 
     return matchesSearch && matchesCategory && matchesStatus;
   });
 
-  // 获取要展示的页面上限数据
   const displayedItems = filteredItems.slice(0, itemsPerPage);
 
   if (loading) {
@@ -150,16 +136,13 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-gray-50 px-4 py-6 md:px-8">
-      {/* 标题 */}
       <header className="mb-6">
         <h1 className="text-2xl md:text-3xl font-extrabold text-gray-950 flex items-center gap-2">
           <span>🔍</span> 内部商品検索システム
         </h1>
       </header>
 
-      {/* 搜索 & 过滤工具栏 */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-12 bg-white p-4 rounded-xl shadow-sm border border-gray-200 mb-6">
-        {/* 搜索框 */}
         <div className="lg:col-span-6">
           <label className="block text-xs font-semibold text-gray-500 mb-1">検索:</label>
           <input
@@ -170,7 +153,6 @@ export default function Home() {
             className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
-        {/* 中分类选择 */}
         <div className="lg:col-span-2">
           <label className="block text-xs font-semibold text-gray-500 mb-1">中分類:</label>
           <select
@@ -183,7 +165,6 @@ export default function Home() {
             ))}
           </select>
         </div>
-        {/* 状态选择 */}
         <div className="lg:col-span-2">
           <label className="block text-xs font-semibold text-gray-500 mb-1">状態:</label>
           <select
@@ -196,7 +177,6 @@ export default function Home() {
             ))}
           </select>
         </div>
-        {/* 显示件数 */}
         <div className="lg:col-span-2">
           <label className="block text-xs font-semibold text-gray-500 mb-1">表示件数:</label>
           <select
@@ -211,12 +191,10 @@ export default function Home() {
         </div>
       </div>
 
-      {/* 数据量状态统计 */}
       <div className="mb-4 text-sm text-gray-600 font-medium">
         📊 検索結果: <span className="text-blue-600 font-bold">{filteredItems.length}</span> 件
       </div>
 
-      {/* 卡片展示区 */}
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
         {displayedItems.length > 0 ? (
           displayedItems.map((item, index) => {
@@ -225,16 +203,12 @@ export default function Home() {
             const feature = item['特徴'] || '-';
             const status = item['状態詳細'] || '-';
             const seller = item['出品者'] || '-';
-            
-            // 读取「箱番」或「商品番号」
             const boxNumber = item['箱番'] || item['商品番号'] || '-'; 
 
-            // 各价格格式化
             const sashine = formatPrice(item['指値']);
-            const ourSashine = formatPrice(item['自社指値'] || item['指値2']); // 兼容指値2
+            const ourSashine = formatPrice(item['自社指値'] || item['指値2']);
             const sellPrice = formatPrice(item['売価予想']);
 
-            // 1/2/3手出价信息
             const c1Name = item['1番手顧客'] || '-';
             const c1Bid = formatPrice(item['1番手入札']);
             const c2Name = item['2番手顧客'] || '-';
@@ -242,7 +216,6 @@ export default function Home() {
             const c3Name = item['3番手顧客'] || '-';
             const c3Bid = formatPrice(item['3番手入札']);
 
-            // 图片获取逻辑 (已拿掉商品URL，只认画像URL)
             const imgUrl = item['画像URL'] || 'https://via.placeholder.com/400x300?text=No+Image';
 
             return (
@@ -250,12 +223,10 @@ export default function Home() {
                 key={item.id || index} 
                 className="relative flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition duration-200 hover:translate-y-[-3px] hover:border-blue-500 hover:shadow-md"
               >
-                {/* 品牌悬浮标签 */}
                 <div className="absolute left-3 top-3 z-10 rounded bg-gray-900/90 px-2 py-1 text-xs font-bold text-white backdrop-blur-[2px]">
                   {brand}
                 </div>
 
-                {/* 商品图片区 */}
                 <div className="relative h-48 w-full bg-gray-100">
                   <img
                     src={imgUrl}
@@ -267,9 +238,7 @@ export default function Home() {
                   />
                 </div>
 
-                {/* 卡片详细内容区 */}
                 <div className="flex flex-1 flex-col p-4">
-                  {/* 分类和箱番并排展示 */}
                   <div className="flex justify-between items-center mb-1">
                     <span className="text-xs font-bold text-blue-600">{category}</span>
                     <span className="text-xs font-mono font-bold text-gray-600 bg-gray-100 px-2 py-0.5 rounded border border-gray-200">
@@ -281,7 +250,6 @@ export default function Home() {
                     {feature}
                   </div>
 
-                  {/* 信息列表（元数据） */}
                   <div className="rounded-lg border border-gray-100 bg-gray-50/50 p-2.5 text-xs space-y-1.5 mt-auto">
                     <div className="flex justify-between border-b border-dashed border-gray-100 pb-1.5">
                       <span className="text-gray-400">出品者</span>
@@ -305,7 +273,6 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* 出价详情版块 */}
                   <div className="mt-2.5 rounded-lg bg-blue-50/40 p-2.5 text-xs space-y-1.5">
                     <div className="flex justify-between">
                       <span className="text-gray-500">① {c1Name}</span>
@@ -331,10 +298,9 @@ export default function Home() {
         )}
       </div>
 
-      {/* 分页溢出提示 */}
       {filteredItems.length > itemsPerPage && (
         <div className="mt-8 text-center text-sm text-gray-400 font-medium">
-          ⚠️ 表示上限（{itemsPerPage}件）に達しました。検索条件を絞るか、表示件数を変更してください。
+          ⚠️ 表示上限（{itemsPerPage}件）に达しました。検索条件を绞るか、表示件数を変更してください。
         </div>
       )}
     </main>
