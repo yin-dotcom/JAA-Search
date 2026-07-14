@@ -2,6 +2,21 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
+
+// 1. 先把 Vercel 里的值拿出来
+let supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+let supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+// 2. 【核武器级拦截】：只要它不是以 http 开头（无论是空格、乱码还是空串），统统强制替换！
+if (!supabaseUrl.startsWith('http')) {
+  supabaseUrl = 'https://placeholder.supabase.co';
+}
+if (!supabaseAnonKey) {
+  supabaseAnonKey = 'placeholder-key';
+}
+
+// 3. 安全初始化
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 // 初始化 Supabase 客户端 (给一个合法的占位符，防止打包阶段崩溃)
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
