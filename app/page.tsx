@@ -93,16 +93,13 @@ export default function Home() {
         query = query.lte('大会開催日', endDate);
       }
 
-      // 6. 拼接条件：排序规则
+     // 6. 拼接条件：排序规则
       if (priceSortState !== 'none') {
-        // 假设价格存放在 自社指値 字段
         query = query.order('自社指値', { ascending: priceSortState === 'asc' });
       } else if (dateSortState !== 'none') {
         query = query.order('大会開催日', { ascending: dateSortState === 'asc' });
-      } else {
-        // 默认按 ID 或创建时间降序保证最新数据在前
-        query = query.order('id', { ascending: false });
       }
+      // 删除了原本默认按 id 排序的逻辑，避免找不到 id 列报错
 
       // 7. 拼接条件：真实分页 (range)
       const from = (currentPage - 1) * itemsPerPage;
@@ -442,7 +439,7 @@ export default function Home() {
               <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px dashed #fce4ec' }}>
                 <p><b>指値:</b> {formatPrice(activeModalItem['指値'])}</p>
                 <p><b>自社指値:</b> <span style={{ color: '#e74c3c', fontWeight: 'bold', fontSize: '15px' }}>{formatPrice(activeModalItem['自社指値'] || activeModalItem['指値2'] || activeModalItem['指値'])}</span></p>
-                <p><b>売価予想:</b> {formatPrice(activeModalItem['売価予想'])}</p>
+               <p><b>売価予想:</b> {activeModalItem['売価予想'] || '-'}</p>
               </div>
 
               <div style={{ marginTop: '10px', padding: '8px', background: '#fff0f5', borderRadius: '8px', fontSize: '12px' }}>
