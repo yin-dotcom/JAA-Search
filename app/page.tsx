@@ -3,19 +3,13 @@
 import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-// 1. 读取变量（变量名已统一且唯一）
-let rawUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-let rawKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+// ==========================================
+// 💡 【大功告成】把你的真钥匙死死焊在代码最顶端，彻底无视 Vercel 环境变量！
+// ==========================================
+const rawUrl = 'https://dqspprzxyqwtgkwzuweg.supabase.co';
+const rawKey = 'sb_publishable_xWVmfXjPbBM45y9xyhlcLA_y-Jz8cx-';
 
-// 2. 强力防御空值或空格导致的崩溃：如果格式不满足 http 开头，直接拦截改用占位符
-if (!rawUrl || !rawUrl.trim().startsWith('http')) {
-  rawUrl = 'https://placeholder.supabase.co';
-}
-if (!rawKey || !rawKey.trim()) {
-  rawKey = 'placeholder-key';
-}
-
-// 3. 干净唯一的初始化，绝无任何重复声明
+// 唯一且绝对合法的客户端初始化
 const supabase = createClient(rawUrl, rawKey);
 
 export default function Home() {
@@ -81,13 +75,8 @@ export default function Home() {
       }
     }
 
-    // 判断是否在用假链接，如果用的是真链接才发请求
-    if (rawUrl && rawKey && !rawUrl.includes('placeholder')) {
-      fetchData();
-    } else {
-      setError('Supabaseの認証キーが設定されていません。Vercel の Environment Variables を確認してください。');
-      setLoading(false);
-    }
+    // 既然钥匙绝对存在且合法，我们闭着眼直接请求
+    fetchData();
   }, []);
 
   const formatPrice = (val: any) => {
@@ -300,7 +289,7 @@ export default function Home() {
 
       {filteredItems.length > itemsPerPage && (
         <div className="mt-8 text-center text-sm text-gray-400 font-medium">
-          ⚠️ 表示上限（{itemsPerPage}件）に达しました。検索条件を绞るか、表示件数を変更してください。
+          ⚠️ 表示上限（{itemsPerPage}件）に達しました。検索条件を絞るか、表示件数を変更してください。
         </div>
       )}
     </main>
