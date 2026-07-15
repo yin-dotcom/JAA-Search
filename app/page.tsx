@@ -45,8 +45,8 @@ export default function Home() {
   const [dateSortState, setDateSortState] = useState<'none' | 'asc' | 'desc'>('none');
 
   const [activeModalItem, setActiveModalItem] = useState<any | null>(null);
+  const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]);
 
-  // 💡 【核心黑科技 1】提取纯数字用于底层排序（比如把 "レ11.6" 变成 11.6）
   const extractSortPrice = (val: any): number => {
     if (!val) return 0;
     const strVal = String(val).replace(/[¥,\s]/g, '');
@@ -54,11 +54,10 @@ export default function Home() {
     return match ? parseFloat(match[0]) : 0;
   };
 
-  // 💡 【核心黑科技 2】智能 UI 显示（如果是纯数字就加 ¥，如果是文本就原样显示）
   const formatPrice = (val: any) => {
     if (!val) return '-';
     const strVal = String(val);
-    if (/[a-zA-Zぁ-んァ-ン一-龥]/.test(strVal)) return strVal; // 包含字母或日语，直接原样返回
+    if (/[a-zA-Zぁ-んァ-ン一-龥]/.test(strVal)) return strVal;
     
     const num = parseFloat(strVal.replace(/[¥,]/g, '').trim());
     return !isNaN(num) && num > 0 ? `¥${num.toLocaleString()}` : strVal;
@@ -111,36 +110,38 @@ export default function Home() {
     try {
       setLoading(true);
       setError(null);
+      setSelectedIndexes([]);
 
       let query = supabase.from('jaa_items').select('*', { count: 'exact' });
 
-      // 关键词搜索
       if (activeSearchTerm.trim()) {
         const t = `%${activeSearchTerm.trim()}%`;
         query = query.or(`ブランド.ilike.${t},特徴.ilike.${t},中分類.ilike.${t},箱番.ilike.${t}`);
       }
 
-      // 分类与状态筛选
       if (selectedMainCat !== 'ALL') {
         const validSubCats = MAIN_CAT_MAPPING[selectedMainCat] || [];
         if (validSubCats.length > 0) query = query.in('中分類', validSubCats);
       }
       if (selectedSubCat !== 'ALL') query = query.eq('中分類', selectedSubCat);
-      if (selectedStatus !== 'ALL') query = query.ilike('状態詳細', `%${selectedStatus}%`);
+
+      if (selectedStatus !== 'ALL') {
+        query = query.ilike('状態詳細', `%${selectedStatus}%`);
+        if (selectedStatus === 'A') query = query.not('状態詳細', 'ilike', '%SA%').not('状態詳細', 'ilike', '%AB%');
+        else if (selectedStatus === 'B') query = query.not('状態詳細', 'ilike', '%AB%').not('状態詳細', 'ilike', '%BC%');
+        else if (selectedStatus === 'C') query = query.not('状態詳細', 'ilike', '%BC%');
+        else if (selectedStatus === 'S') query = query.not('状態詳細', 'ilike', '%SA%');
+      }
       
-      // 日期筛选翻译 (2025-06-12 -> 250612)
       if (startDate) {
         const dbStartDate = startDate.substring(2).replace(/-/g, '');
         query = query.gte('大会開催日', dbStartDate);
       }
       if (endDate) {
         const dbEndDate = endDate.substring(2).replace(/-/g, '');
-        query = query.lte('大会開催日', dbEndDate + '퟿'); // 加个高位符兼容文本后缀
+        query = query.lte('大会開催日', dbEndDate + '퟿'); 
       }
 
-      // =========================================================
-      // 🚀 核心逻辑分支：由于数据库无法排文本价格，我们需要在前端强行排
-      // =========================================================
       if (priceSortState !== 'none') {
         let allData: any[] = [];
         let from = 0;
@@ -148,7 +149,6 @@ export default function Home() {
         let hasMore = true;
         let totalRecords = 0;
 
-        // 拉取匹配的数据（最高限制 3000 条，保护浏览器不崩溃）
         while (hasMore && allData.length < 3000) {
           const { data, error: dbError, count } = await query.range(from, from + step - 1);
           if (dbError) throw dbError;
@@ -163,20 +163,17 @@ export default function Home() {
           }
         }
 
-        // 💡 在前端强制剥离文字，转换为纯数字并精确排序
         allData.sort((a, b) => {
           const priceA = extractSortPrice(a['自社指値'] || a['指値2'] || a['指値']);
           const priceB = extractSortPrice(b['自社指値'] || b['指値2'] || b['指値']);
           return priceSortState === 'asc' ? priceA - priceB : priceB - priceA;
         });
 
-        // 前端手动切割出当前页的数据
         const startIndex = (currentPage - 1) * itemsPerPage;
         setItems(allData.slice(startIndex, startIndex + itemsPerPage));
         setTotalCount(totalRecords);
 
       } else {
-        // 如果是正常读取或日期排序，走速度最快的数据库服务端分页
         if (dateSortState !== 'none') {
           query = query.order('大会開催日', { ascending: dateSortState === 'asc', nullsFirst: false });
         }
@@ -231,6 +228,7 @@ export default function Home() {
         if (lines.length < 2) throw new Error('データがありません。');
 
         const headers = lines[0].split(',').map(h => h.replace(/^["']|["']$/g, '').trim());
+        const priceColumns = ['自社指値', '指値', '指値2', '1番手入札', '2番手入札', '3番手入札'];
 
         const jsonRows: any[] = [];
         for (let i = 1; i < lines.length; i++) {
@@ -240,7 +238,20 @@ export default function Home() {
           headers.forEach((header, index) => {
             let val = matches[index] ? matches[index].trim() : '';
             val = val.replace(/^["']|["']$/g, '');
-            rowData[header] = val;
+            
+            // 💡 智能清洗 1：价格去逗号和符号
+            if (priceColumns.includes(header)) {
+               const cleanedVal = val.replace(/[¥,]/g, '').trim();
+               rowData[header] = cleanedVal === '' ? null : Number(cleanedVal);
+            } 
+            // 💡 智能清洗 2：如果画像URL里带了 =IMAGE("网址") 公式，强行剥掉外壳提取网址！
+            else if (header === '画像URL' || header === '画像') {
+               const imgMatch = val.match(/=IMAGE\(['"]?(.*?)['"]?\)/i);
+               rowData[header] = imgMatch ? imgMatch[1] : val;
+            } 
+            else {
+               rowData[header] = val;
+            }
           });
           jsonRows.push(rowData);
         }
@@ -264,6 +275,40 @@ export default function Home() {
       }
     };
     reader.readAsText(file, 'utf-8');
+  };
+
+  const handleDownloadCSV = () => {
+    if (selectedIndexes.length === 0) return;
+
+    const selectedItems = items.filter((_, index) => selectedIndexes.includes(index));
+    if (selectedItems.length === 0) return;
+
+    const headers = Object.keys(selectedItems[0]).filter(k => k !== 'id');
+
+    const csvRows = [];
+    csvRows.push(headers.join(',')); 
+
+    selectedItems.forEach(item => {
+      const row = headers.map(header => {
+        let val = item[header] === null || item[header] === undefined ? '' : String(item[header]);
+        if (val.includes(',') || val.includes('\n') || val.includes('"')) {
+          val = `"${val.replace(/"/g, '""')}"`;
+        }
+        return val;
+      });
+      csvRows.push(row.join(','));
+    });
+
+    const csvContent = '\uFEFF' + csvRows.join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `選択商品_${new Date().getTime()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const toggleDateSort = () => {
@@ -329,7 +374,30 @@ export default function Home() {
             )}
           </div>
           
-          <div style={{ marginLeft: '10px' }}>
+          <div style={{ marginLeft: '10px', display: 'flex', gap: '6px' }}>
+            <button 
+              className="btn-search" 
+              style={{ background: '#78909c' }} 
+              onClick={() => {
+                if (selectedIndexes.length === items.length && items.length > 0) {
+                  setSelectedIndexes([]); 
+                } else {
+                  setSelectedIndexes(items.map((_, idx) => idx)); 
+                }
+              }}
+            >
+              {selectedIndexes.length === items.length && items.length > 0 ? "全解除" : "全選択"}
+            </button>
+
+            <button 
+              className="btn-search" 
+              style={{ background: selectedIndexes.length > 0 ? '#42a5f5' : '#bbdefb', cursor: selectedIndexes.length > 0 ? 'pointer' : 'not-allowed' }} 
+              onClick={handleDownloadCSV}
+              disabled={selectedIndexes.length === 0}
+            >
+              CSVダウンロード ({selectedIndexes.length})
+            </button>
+
             <input type="file" accept=".csv" ref={fileInputRef} style={{ display: 'none' }} onChange={handleCSVUpload} disabled={uploading}/>
             <button className="btn-search" style={{ background: '#ec407a' }} onClick={() => fileInputRef.current?.click()} disabled={uploading}>
               {uploading ? "処理中..." : "CSVアップ"}
@@ -433,8 +501,26 @@ export default function Home() {
               const c3Name = item['3番手顧客'] || '';
               const c3Bid = formatPrice(item['3番手入札']);
 
+              const isSelected = selectedIndexes.includes(index);
+
               return (
-                <div key={item.id || index} className="item-card" onClick={() => setActiveModalItem(item)}>
+                <div 
+                  key={item.id || index} 
+                  className={`item-card ${isSelected ? 'selected' : ''}`} 
+                  onClick={() => setActiveModalItem(item)}
+                >
+                  <div 
+                    className="checkbox-wrapper" 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedIndexes(prev => 
+                        prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]
+                      );
+                    }}
+                  >
+                    <input type="checkbox" checked={isSelected} readOnly />
+                  </div>
+
                   <div className="brand-badge">{brand}</div>
                   
                   <img src={imgUrl} alt={brand} onError={(e) => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/400x300?text=No+Image'; }}/>
@@ -493,7 +579,14 @@ export default function Home() {
         <div className="modal-overlay" style={{ display: 'flex' }} onClick={() => setActiveModalItem(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <button className="modal-close" onClick={() => setActiveModalItem(null)}>×</button>
-            <img className="modal-img" style={{ objectFit: 'contain', backgroundColor: '#fafafa' }} src={activeModalItem['画像URL'] || 'https://via.placeholder.com/400x300?text=No+Image'} alt="画像" />
+            {/* 💡 修复：弹窗图片补充 onError 拦截保护 */}
+            <img 
+              className="modal-img" 
+              style={{ objectFit: 'contain', backgroundColor: '#fafafa' }} 
+              src={activeModalItem['画像URL'] || 'https://via.placeholder.com/400x300?text=No+Image'} 
+              alt="画像" 
+              onError={(e) => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/400x300?text=No+Image'; }}
+            />
             <div className="modal-title">{activeModalItem['特徴'] || activeModalItem['商品名'] || "無題の商品"}</div>
             <div className="modal-details">
               <p><b>ブランド:</b> {activeModalItem['ブランド'] || 'なし'}</p>
@@ -527,9 +620,9 @@ export default function Home() {
         .search-row { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; }
         .search-group { display: flex; flex: 1; background: #fafafa; padding: 2px; border-radius: 8px; border: 1px solid var(--border-color); align-items: center; }
         input[type="text"] { flex: 1; border: none; background: transparent; padding: 10px 15px; font-size: 14px; outline: none; color: var(--text-main); }
-        .btn-search { background-color: var(--primary-color); color: white; border: none; border-radius: 6px; padding: 10px 20px; font-weight: 600; cursor: pointer; transition: background 0.2s; margin-right: 2px; outline: none; white-space: nowrap; }
-        .btn-search:hover { background-color: var(--primary-hover); }
-        .btn-search:disabled { background-color: #f5b7cd; cursor: not-allowed; }
+        .btn-search { background-color: var(--primary-color); color: white; border: none; border-radius: 6px; padding: 10px 20px; font-weight: 600; cursor: pointer; transition: background 0.2s; margin-right: 2px; outline: none; white-space: nowrap; border: 1px solid transparent; }
+        .btn-search:hover { filter: brightness(0.95); }
+        .btn-search:disabled { opacity: 0.6; cursor: not-allowed; }
         .suggestions-dropdown { position: absolute; top: calc(100% + 5px); left: 0; right: 0; background: white; border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 4px 15px rgba(244,143,177,0.2); z-index: 100; max-height: 250px; overflow-y: auto; overflow-x: hidden; }
         .suggestion-item { padding: 12px 15px; cursor: pointer; font-size: 14px; border-bottom: 1px solid #fdfdfd; color: var(--text-main); transition: 0.2s; }
         .suggestion-item:last-child { border-bottom: none; }
@@ -541,11 +634,18 @@ export default function Home() {
         .btn-sort:hover { background: var(--border-color); }
         .btn-sort.active { background: var(--primary-color); color: white; }
         .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; }
-        .item-card { background: white; border-radius: 12px; overflow: hidden; border: 1px solid var(--border-color); transition: 0.3s; padding: 10px; position: relative; cursor: pointer; display: flex; flex-direction: column; }
-        .item-card:hover { box-shadow: 0 5px 15px rgba(244,143,177,0.2); transform: translateY(-2px); }
-        .item-card img { width: 100%; height: 180px; object-fit: cover; border-radius: 8px; background: #fdfdfd; margin-bottom: 10px; }
-        .brand-badge { position: absolute; top: 15px; left: 15px; background: rgba(255, 255, 255, 0.9); padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: bold; color: var(--text-main); border: 1px solid var(--border-color); backdrop-filter: blur(4px); z-index: 10; }
         
+        .item-card { background: white; border-radius: 12px; overflow: hidden; border: 2px solid var(--border-color); transition: 0.3s; padding: 10px; position: relative; cursor: pointer; display: flex; flex-direction: column; }
+        .item-card:hover { box-shadow: 0 5px 15px rgba(244,143,177,0.2); transform: translateY(-2px); }
+        .item-card.selected { border: 2px solid #42a5f5; background: #e3f2fd; box-shadow: 0 4px 12px rgba(66, 165, 245, 0.3); }
+        
+        .checkbox-wrapper { position: absolute; top: 12px; left: 12px; z-index: 20; background: rgba(255, 255, 255, 0.95); padding: 6px; border-radius: 6px; border: 1px solid #ccc; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); cursor: pointer; transition: 0.2s; }
+        .checkbox-wrapper:hover { transform: scale(1.1); border-color: #42a5f5; }
+        .checkbox-wrapper input { cursor: pointer; transform: scale(1.3); margin: 0; pointer-events: none; }
+        
+        .brand-badge { position: absolute; top: 12px; left: 45px; background: rgba(255, 255, 255, 0.9); padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: bold; color: var(--text-main); border: 1px solid var(--border-color); backdrop-filter: blur(4px); z-index: 10; }
+        
+        .item-card img { width: 100%; height: 180px; object-fit: cover; border-radius: 8px; background: #fdfdfd; margin-bottom: 10px; }
         .tag-box { background: #e0e0e0; color: #333; padding: 3px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; font-family: monospace; }
         .tag-date { background: #fce4ec; color: #d81b60; padding: 3px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; border: 1px solid #f8bbd0; }
         
