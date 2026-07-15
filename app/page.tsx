@@ -46,6 +46,24 @@ export default function Home() {
 
   const [activeModalItem, setActiveModalItem] = useState<any | null>(null);
 
+  // 💡 【核心黑科技 1】提取纯数字用于底层排序（比如把 "レ11.6" 变成 11.6）
+  const extractSortPrice = (val: any): number => {
+    if (!val) return 0;
+    const strVal = String(val).replace(/[¥,\s]/g, '');
+    const match = strVal.match(/-?\d+(\.\d+)?/);
+    return match ? parseFloat(match[0]) : 0;
+  };
+
+  // 💡 【核心黑科技 2】智能 UI 显示（如果是纯数字就加 ¥，如果是文本就原样显示）
+  const formatPrice = (val: any) => {
+    if (!val) return '-';
+    const strVal = String(val);
+    if (/[a-zA-Zぁ-んァ-ン一-龥]/.test(strVal)) return strVal; // 包含字母或日语，直接原样返回
+    
+    const num = parseFloat(strVal.replace(/[¥,]/g, '').trim());
+    return !isNaN(num) && num > 0 ? `¥${num.toLocaleString()}` : strVal;
+  };
+
   useEffect(() => {
     if (skipSuggest.current) {
       skipSuggest.current = false;
@@ -96,46 +114,87 @@ export default function Home() {
 
       let query = supabase.from('jaa_items').select('*', { count: 'exact' });
 
-      // 🎯 修复 1：只搜索确定存在的列。去掉了 1番手顧客 等可能会导致崩溃的列。
+      // 关键词搜索
       if (activeSearchTerm.trim()) {
         const t = `%${activeSearchTerm.trim()}%`;
         query = query.or(`ブランド.ilike.${t},特徴.ilike.${t},中分類.ilike.${t},箱番.ilike.${t}`);
       }
 
-      // 🎯 修复 2：如果你的新表里没有“大分類”，这里会引发崩溃，所以我用中分类做了前端智能匹配，避开数据库报错。
+      // 分类与状态筛选
       if (selectedMainCat !== 'ALL') {
         const validSubCats = MAIN_CAT_MAPPING[selectedMainCat] || [];
-        if (validSubCats.length > 0) {
-          const inQuery = validSubCats.map(cat => `"${cat}"`).join(',');
-          query = query.in('中分類', validSubCats);
-        }
+        if (validSubCats.length > 0) query = query.in('中分類', validSubCats);
       }
-
-      if (selectedSubCat !== 'ALL') {
-        query = query.eq('中分類', selectedSubCat);
-      }
-
-      // ⚠️ 如果你的新表没有 状態詳細 这一列，请把下面这行加上注释符 //
-      // if (selectedStatus !== 'ALL') query = query.or(`状態詳細.ilike.%${selectedStatus}%,ランク.ilike.%${selectedStatus}%`);
+      if (selectedSubCat !== 'ALL') query = query.eq('中分類', selectedSubCat);
+      if (selectedStatus !== 'ALL') query = query.ilike('状態詳細', `%${selectedStatus}%`);
       
-      // ⚠️ 同理，如果没有 大会開催日 列，请注释掉下面这两行
-      // if (startDate) query = query.gte('大会開催日', startDate);
-      // if (endDate) query = query.lte('大会開催日', endDate);
+      // 日期筛选翻译 (2025-06-12 -> 250612)
+      if (startDate) {
+        const dbStartDate = startDate.substring(2).replace(/-/g, '');
+        query = query.gte('大会開催日', dbStartDate);
+      }
+      if (endDate) {
+        const dbEndDate = endDate.substring(2).replace(/-/g, '');
+        query = query.lte('大会開催日', dbEndDate + '퟿'); // 加个高位符兼容文本后缀
+      }
 
-      const from = (currentPage - 1) * itemsPerPage;
-      const to = from + itemsPerPage - 1;
-      query = query.range(from, to);
+      // =========================================================
+      // 🚀 核心逻辑分支：由于数据库无法排文本价格，我们需要在前端强行排
+      // =========================================================
+      if (priceSortState !== 'none') {
+        let allData: any[] = [];
+        let from = 0;
+        const step = 1000;
+        let hasMore = true;
+        let totalRecords = 0;
 
-      const { data, error: dbError, count } = await query;
+        // 拉取匹配的数据（最高限制 3000 条，保护浏览器不崩溃）
+        while (hasMore && allData.length < 3000) {
+          const { data, error: dbError, count } = await query.range(from, from + step - 1);
+          if (dbError) throw dbError;
+          if (count !== null) totalRecords = count;
+          
+          if (data && data.length > 0) {
+            allData = [...allData, ...data];
+            from += step;
+            if (data.length < step) hasMore = false;
+          } else {
+            hasMore = false;
+          }
+        }
 
-      if (dbError) throw dbError;
+        // 💡 在前端强制剥离文字，转换为纯数字并精确排序
+        allData.sort((a, b) => {
+          const priceA = extractSortPrice(a['自社指値'] || a['指値2'] || a['指値']);
+          const priceB = extractSortPrice(b['自社指値'] || b['指値2'] || b['指値']);
+          return priceSortState === 'asc' ? priceA - priceB : priceB - priceA;
+        });
 
-      setItems(data || []);
-      setTotalCount(count || 0);
+        // 前端手动切割出当前页的数据
+        const startIndex = (currentPage - 1) * itemsPerPage;
+        setItems(allData.slice(startIndex, startIndex + itemsPerPage));
+        setTotalCount(totalRecords);
+
+      } else {
+        // 如果是正常读取或日期排序，走速度最快的数据库服务端分页
+        if (dateSortState !== 'none') {
+          query = query.order('大会開催日', { ascending: dateSortState === 'asc', nullsFirst: false });
+        }
+        
+        const from = (currentPage - 1) * itemsPerPage;
+        const to = from + itemsPerPage - 1;
+        query = query.range(from, to);
+
+        const { data, error: dbError, count } = await query;
+        if (dbError) throw dbError;
+
+        setItems(data || []);
+        setTotalCount(count || 0);
+      }
 
     } catch (err: any) {
       console.error('Fetch Error:', err);
-      setError(err.message || 'データベースへのアクセスに失敗しました。');
+      setError(err.message || 'データベースエラーが発生しました。');
     } finally {
       setLoading(false);
     }
@@ -160,16 +219,16 @@ export default function Home() {
     if (!file) return;
 
     setUploading(true);
-    setUploadStatus('CSVファイルを読み込んでいます...');
+    setUploadStatus('CSVを読み込んでいます...');
 
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
         const text = event.target?.result as string;
-        if (!text) throw new Error('ファイルを読み込めませんでした。');
+        if (!text) throw new Error('読み込めませんでした。');
 
         const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
-        if (lines.length < 2) throw new Error('CSVファイルに有効なデータがありません。');
+        if (lines.length < 2) throw new Error('データがありません。');
 
         const headers = lines[0].split(',').map(h => h.replace(/^["']|["']$/g, '').trim());
 
@@ -186,18 +245,18 @@ export default function Home() {
           jsonRows.push(rowData);
         }
 
-        setUploadStatus(`Supabaseへ ${jsonRows.length} 件のデータを登録中...`);
+        setUploadStatus(`Supabaseへ ${jsonRows.length} 件登録中...`);
 
         const { error: insertError } = await supabase.from('jaa_items').insert(jsonRows);
         if (insertError) throw insertError;
 
-        setUploadStatus('🎉 アップロードが成功しました！');
+        setUploadStatus('🎉 アップロード成功！');
         setTimeout(() => setUploadStatus(null), 4000);
         
         fetchRealData(); 
       } catch (err: any) {
         console.error(err);
-        alert(`アップロード失敗: ${err.message}`);
+        alert(`失敗: ${err.message}`);
         setUploadStatus(null);
       } finally {
         setUploading(false);
@@ -205,18 +264,6 @@ export default function Home() {
       }
     };
     reader.readAsText(file, 'utf-8');
-  };
-
-  const parsePrice = (val: any): number => {
-    if (!val) return 0;
-    const cleanVal = String(val).replace('¥', '').replace(/,/g, '').trim();
-    const num = parseFloat(cleanVal);
-    return !isNaN(num) ? Math.floor(num) : 0;
-  };
-
-  const formatPrice = (val: any) => {
-    const num = parsePrice(val);
-    return num > 0 ? `¥${num.toLocaleString()}` : '-';
   };
 
   const toggleDateSort = () => {
@@ -275,7 +322,7 @@ export default function Home() {
                     className="suggestion-item"
                     onMouseDown={() => handleSelectBrand(brand)}
                   >
-                    🔍 <b>{brand}</b> に変換して検索
+                    🔍 <b>{brand}</b> に変換
                   </div>
                 ))}
               </div>
@@ -285,7 +332,7 @@ export default function Home() {
           <div style={{ marginLeft: '10px' }}>
             <input type="file" accept=".csv" ref={fileInputRef} style={{ display: 'none' }} onChange={handleCSVUpload} disabled={uploading}/>
             <button className="btn-search" style={{ background: '#ec407a' }} onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-              {uploading ? "処理中..." : "CSVアップロード"}
+              {uploading ? "処理中..." : "CSVアップ"}
             </button>
           </div>
         </div>
@@ -316,9 +363,9 @@ export default function Home() {
             </select>
           </div>
           <div className="filter-item">
-            <span>状態:</span>
+            <span>ランク:</span>
             <select value={selectedStatus} onChange={(e) => { setSelectedStatus(e.target.value); setCurrentPage(1); }}>
-              {["ALL", "N", "S", "SA", "A", "AB", "B", "BC", "C"].map(status => <option key={status} value={status}>{status}</option>)}
+              {["ALL", "S", "SA", "A", "AB", "B", "BC", "C", "D"].map(status => <option key={status} value={status}>{status}</option>)}
             </select>
           </div>
           <div className="filter-item">
@@ -371,11 +418,10 @@ export default function Home() {
               const brand = item['ブランド'] || '不明';
               const subCategory = item['中分類'] || '-';
               const feature = item['特徴'] || item['商品名'] || '-';
-              const status = item['状態詳細'] || item['ランク'] || 'なし';
-              const boxNumber = item['箱番'] || item['商品番号'] || '-';
               
+              const status = item['状態詳細'] || item['ランク'] || '';
+              const boxNumber = item['箱番'] || item['商品番号'] || '-';
               const eventDate = item['大会開催日'] || item['日付'] || '';
-              const formattedEventDate = eventDate ? eventDate.substring(0, 10) : '';
 
               const ourSashine = formatPrice(item['自社指値'] || item['指値2'] || item['指値']);
               const imgUrl = item['画像URL'] || 'https://via.placeholder.com/400x300?text=No+Image';
@@ -390,19 +436,23 @@ export default function Home() {
               return (
                 <div key={item.id || index} className="item-card" onClick={() => setActiveModalItem(item)}>
                   <div className="brand-badge">{brand}</div>
-                  {formattedEventDate && <div className="date-badge">🗓 {formattedEventDate}</div>}
+                  
                   <img src={imgUrl} alt={brand} onError={(e) => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/400x300?text=No+Image'; }}/>
                   
                   <div className="item-info">
+                    <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }}>
+                      <span className="tag-box">📦 {boxNumber}</span>
+                      {eventDate && <span className="tag-date">🗓 {eventDate}</span>}
+                    </div>
+
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span className="item-cat">{subCategory}</span>
-                      <span style={{ fontSize: '11px', color: '#8e9eab', marginLeft: 'auto', fontFamily: 'monospace' }}>{boxNumber}</span>
                     </div>
 
                     <div className="item-feat" title={feature}>{feature}</div>
 
                     <div className="tags-container">
-                      <span className="tag-rank">{status}</span>
+                      {status && <span className="tag-rank">{status}</span>}
                       {item['出品者'] && <span className="tag-normal">{item['出品者']}</span>}
                     </div>
 
@@ -438,6 +488,7 @@ export default function Home() {
         </div>
       )}
 
+      {/* 弹窗 */}
       {activeModalItem && (
         <div className="modal-overlay" style={{ display: 'flex' }} onClick={() => setActiveModalItem(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -448,7 +499,7 @@ export default function Home() {
               <p><b>ブランド:</b> {activeModalItem['ブランド'] || 'なし'}</p>
               <p><b>カテゴリ:</b> {activeModalItem['大分類'] || ''} &gt; {activeModalItem['中分類'] || ''}</p>
               <p><b>ランク:</b> <span style={{ color: '#f06292', fontWeight: 'bold' }}>{activeModalItem['状態詳細'] || activeModalItem['ランク'] || 'なし'}</span></p>
-              <p><b>箱番/商品番号:</b> {activeModalItem['箱番'] || activeModalItem['商品番号'] || 'なし'}</p>
+              <p><b>箱番:</b> {activeModalItem['箱番'] || activeModalItem['商品番号'] || 'なし'}</p>
               <p><b>出品者:</b> {activeModalItem['出品者'] || 'なし'}</p>
               <p><b>大会開催日:</b> {activeModalItem['大会開催日'] || activeModalItem['日付'] || 'なし'}</p>
               
@@ -492,14 +543,17 @@ export default function Home() {
         .results { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px; }
         .item-card { background: white; border-radius: 12px; overflow: hidden; border: 1px solid var(--border-color); transition: 0.3s; padding: 10px; position: relative; cursor: pointer; display: flex; flex-direction: column; }
         .item-card:hover { box-shadow: 0 5px 15px rgba(244,143,177,0.2); transform: translateY(-2px); }
-        .item-card img { width: 100%; height: 180px; object-fit: cover; border-radius: 8px; background: #fdfdfd; }
+        .item-card img { width: 100%; height: 180px; object-fit: cover; border-radius: 8px; background: #fdfdfd; margin-bottom: 10px; }
         .brand-badge { position: absolute; top: 15px; left: 15px; background: rgba(255, 255, 255, 0.9); padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: bold; color: var(--text-main); border: 1px solid var(--border-color); backdrop-filter: blur(4px); z-index: 10; }
-        .date-badge { position: absolute; top: 15px; right: 15px; background: rgba(244, 143, 177, 0.95); padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: bold; color: white; border: 1px solid #f06292; backdrop-filter: blur(4px); z-index: 10; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-        .item-info { padding: 10px 5px 5px 5px; display: flex; flex-direction: column; flex: 1; }
+        
+        .tag-box { background: #e0e0e0; color: #333; padding: 3px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; font-family: monospace; }
+        .tag-date { background: #fce4ec; color: #d81b60; padding: 3px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; border: 1px solid #f8bbd0; }
+        
+        .item-info { padding: 5px; display: flex; flex-direction: column; flex: 1; }
         .item-cat { font-size: 11px; color: var(--primary-hover); font-weight: bold; }
         .item-feat { font-size: 13px; margin: 8px 0; height: 3em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.5; color: var(--text-main); }
         .tags-container { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; font-size: 11px; margin-top: auto; }
-        .tag-rank { background: #fce4ec; color: #d81b60; padding: 3px 6px; border-radius: 4px; font-weight: bold; }
+        .tag-rank { background: #fff0f5; color: #d81b60; padding: 3px 6px; border-radius: 4px; font-weight: bold; border: 1px solid #f8bbd0; }
         .tag-normal { background: #f5f5f5; color: #666; padding: 3px 6px; border-radius: 4px; max-w: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .price-list { margin-top: 8px; border-top: 1px dashed var(--border-color); padding-top: 8px; }
         .price-row { display: flex; justify-content: space-between; align-items: center; }
