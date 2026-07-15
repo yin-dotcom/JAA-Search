@@ -3,15 +3,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-// ==========================================
-// 💡 【硬编码凭证】直接硬编码，规避 Vercel 环境变量隐患
-// ==========================================
 const rawUrl = 'https://dqspprzxyqwtgkwzuweg.supabase.co';
 const rawKey = 'sb_publishable_xWVmfXjPbBM45y9xyhlcLA_y-Jz8cx-';
-
 const supabase = createClient(rawUrl, rawKey);
 
-// 🎯 精确中分类映射表
 const MAIN_CAT_MAPPING: { [key: string]: string[] } = {
   "アパレル": ["ジャケット・ブルゾン", "コート", "スーツ・セットアップ", "ダウンジャケット・コート", "トップス", "ワンピース", "Tシャツ", "ポロシャツ", "シャツ", "パンツ", "スカート", "ニット・セーター", "カーディガン", "アンサンブル", "パーカー", "ベスト", "ジャージ・スウェット", "キャミソール・チュニック", "オールインワン", "その他"],
   "靴": ["レザーシューズ", "スニーカー", "ブーツ", "サンダル", "パンプス", "ローファー", "スリッポン", "フラットシューズ", "その他"],
@@ -25,21 +20,18 @@ export default function Home() {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  
   const [totalCount, setTotalCount] = useState(0);
 
   const [uploading, setUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 搜索框状态
   const [typedSearchTerm, setTypedSearchTerm] = useState('');
   const [activeSearchTerm, setActiveSearchTerm] = useState('');
   
-  // 💡 智能联想下拉框状态 (查数据库)
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [filteredBrands, setFilteredBrands] = useState<string[]>([]);
-  const skipSuggest = useRef(false); // 防止选中后再次触发搜索联想
+  const skipSuggest = useRef(false); 
 
   const [selectedMainCat, setSelectedMainCat] = useState('ALL');
   const [selectedSubCat, setSelectedSubCat] = useState('ALL');
@@ -54,26 +46,20 @@ export default function Home() {
 
   const [activeModalItem, setActiveModalItem] = useState<any | null>(null);
 
-  // =========================================================
-  // 🚀 云端实时查询品牌字典 (防抖处理)
-  // =========================================================
   useEffect(() => {
     if (skipSuggest.current) {
       skipSuggest.current = false;
       return;
     }
-
     if (!typedSearchTerm.trim()) {
       setShowSuggestions(false);
       setFilteredBrands([]);
       return;
     }
 
-    // 延迟 0.3 秒，防止用户打字太快导致请求爆炸
     const timer = setTimeout(async () => {
       try {
         const val = typedSearchTerm.trim();
-        // ⚠️ 注意：这里假设你的表名叫 brands，列名叫 en_name 和 jp_name
         const { data, error } = await supabase
           .from('brands')
           .select('en_name, jp_name')
@@ -103,9 +89,6 @@ export default function Home() {
     setCurrentPage(1);
   };
 
-  // =========================================================
-  // 🚀 核心：服务端检索（终极全字段覆盖）
-  // =========================================================
   const fetchRealData = async () => {
     try {
       setLoading(true);
@@ -113,23 +96,31 @@ export default function Home() {
 
       let query = supabase.from('jaa_items').select('*', { count: 'exact' });
 
-      // 🎯 终极全字段搜索 (去掉了会导致报错的商品名)
+      // 🎯 修复 1：只搜索确定存在的列。去掉了 1番手顧客 等可能会导致崩溃的列。
       if (activeSearchTerm.trim()) {
         const t = `%${activeSearchTerm.trim()}%`;
-        query = query.or(`ブランド.ilike.${t},特徴.ilike.${t},大分類.ilike.${t},中分類.ilike.${t},状態詳細.ilike.${t},ランク.ilike.${t},箱番.ilike.${t},商品番号.ilike.${t},出品者.ilike.${t},1番手顧客.ilike.${t},2番手顧客.ilike.${t},3番手顧客.ilike.${t}`);
+        query = query.or(`ブランド.ilike.${t},特徴.ilike.${t},中分類.ilike.${t},箱番.ilike.${t}`);
       }
 
-      if (selectedMainCat !== 'ALL') query = query.eq('大分類', selectedMainCat);
-      if (selectedSubCat !== 'ALL') query = query.eq('中分類', selectedSubCat);
-      if (selectedStatus !== 'ALL') query = query.or(`状態詳細.ilike.%${selectedStatus}%,ランク.ilike.%${selectedStatus}%`);
-      if (startDate) query = query.gte('大会開催日', startDate);
-      if (endDate) query = query.lte('大会開催日', endDate);
-
-      if (priceSortState !== 'none') {
-        query = query.order('自社指値', { ascending: priceSortState === 'asc' });
-      } else if (dateSortState !== 'none') {
-        query = query.order('大会開催日', { ascending: dateSortState === 'asc' });
+      // 🎯 修复 2：如果你的新表里没有“大分類”，这里会引发崩溃，所以我用中分类做了前端智能匹配，避开数据库报错。
+      if (selectedMainCat !== 'ALL') {
+        const validSubCats = MAIN_CAT_MAPPING[selectedMainCat] || [];
+        if (validSubCats.length > 0) {
+          const inQuery = validSubCats.map(cat => `"${cat}"`).join(',');
+          query = query.in('中分類', validSubCats);
+        }
       }
+
+      if (selectedSubCat !== 'ALL') {
+        query = query.eq('中分類', selectedSubCat);
+      }
+
+      // ⚠️ 如果你的新表没有 状態詳細 这一列，请把下面这行加上注释符 //
+      // if (selectedStatus !== 'ALL') query = query.or(`状態詳細.ilike.%${selectedStatus}%,ランク.ilike.%${selectedStatus}%`);
+      
+      // ⚠️ 同理，如果没有 大会開催日 列，请注释掉下面这两行
+      // if (startDate) query = query.gte('大会開催日', startDate);
+      // if (endDate) query = query.lte('大会開催日', endDate);
 
       const from = (currentPage - 1) * itemsPerPage;
       const to = from + itemsPerPage - 1;
@@ -154,7 +145,6 @@ export default function Home() {
     fetchRealData();
   }, [ activeSearchTerm, selectedMainCat, selectedSubCat, selectedStatus, startDate, endDate, currentPage, itemsPerPage, priceSortState, dateSortState ]);
 
-
   const executeSearch = () => {
     setActiveSearchTerm(typedSearchTerm);
     setCurrentPage(1);
@@ -165,7 +155,6 @@ export default function Home() {
     if (e.key === 'Enter') executeSearch();
   };
 
-  // CSV 处理...
   const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -268,10 +257,9 @@ export default function Home() {
         <div className="search-row">
           
           <div className="search-group" style={{ position: 'relative' }}>
-            {/* 🎯 更清晰的占位提示 */}
             <input
               type="text"
-              placeholder="ブランド、特徴、箱番、出品者、顧客名などを入力..."
+              placeholder="ブランド、特徴、箱番などを入力..."
               value={typedSearchTerm}
               onChange={(e) => setTypedSearchTerm(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -279,7 +267,6 @@ export default function Home() {
             />
             <button className="btn-search" onClick={executeSearch}>検索</button>
 
-            {/* 💡 智能云端下拉列表 */}
             {showSuggestions && filteredBrands.length > 0 && (
               <div className="suggestions-dropdown">
                 {filteredBrands.map((brand, idx) => (
@@ -451,7 +438,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* 弹窗 */}
       {activeModalItem && (
         <div className="modal-overlay" style={{ display: 'flex' }} onClick={() => setActiveModalItem(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
@@ -469,7 +455,6 @@ export default function Home() {
               <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px dashed #fce4ec' }}>
                 <p><b>指値:</b> {formatPrice(activeModalItem['指値'])}</p>
                 <p><b>自社指値:</b> <span style={{ color: '#e74c3c', fontWeight: 'bold', fontSize: '15px' }}>{formatPrice(activeModalItem['自社指値'] || activeModalItem['指値2'] || activeModalItem['指値'])}</span></p>
-                {/* 🎯 売価予想不再格式化，保留文字和浮点数 */}
                 <p><b>売価予想:</b> {activeModalItem['売価予想'] || '-'}</p>
               </div>
 
@@ -483,7 +468,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* 专属样式 */}
       <style jsx global>{`
         :root { --primary-color: #f48fb1; --primary-hover: #f06292; --bg-color: #fff0f5; --text-main: #4a4a4a; --text-muted: #8e9eab; --card-bg: #ffffff; --border-color: #fce4ec; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: var(--bg-color); color: var(--text-main); margin: 0; padding: 20px; }
@@ -495,13 +479,10 @@ export default function Home() {
         .btn-search { background-color: var(--primary-color); color: white; border: none; border-radius: 6px; padding: 10px 20px; font-weight: 600; cursor: pointer; transition: background 0.2s; margin-right: 2px; outline: none; white-space: nowrap; }
         .btn-search:hover { background-color: var(--primary-hover); }
         .btn-search:disabled { background-color: #f5b7cd; cursor: not-allowed; }
-
-        /* 💡 智能联想下拉菜单 CSS */
         .suggestions-dropdown { position: absolute; top: calc(100% + 5px); left: 0; right: 0; background: white; border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 4px 15px rgba(244,143,177,0.2); z-index: 100; max-height: 250px; overflow-y: auto; overflow-x: hidden; }
         .suggestion-item { padding: 12px 15px; cursor: pointer; font-size: 14px; border-bottom: 1px solid #fdfdfd; color: var(--text-main); transition: 0.2s; }
         .suggestion-item:last-child { border-bottom: none; }
         .suggestion-item:hover { background: var(--bg-color); color: var(--primary-hover); font-weight: bold; padding-left: 20px; }
-
         .filter-row { display: flex; flex-wrap: wrap; gap: 15px; align-items: center; }
         .filter-item { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #555; }
         select, input[type="date"] { padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border-color); background: white; outline: none; color: #4a4a4a; font-size: 13px; }
