@@ -230,21 +230,46 @@ export default function Home() {
         const headers = lines[0].split(',').map(h => h.replace(/^["']|["']$/g, '').trim());
         const priceColumns = ['自社指値', '指値', '指値2', '1番手入札', '2番手入札', '3番手入札'];
 
+        // 💡 修复 1：生成批次号 (Batch ID)
+        const batchId = `batch_${new Date().getTime()}`;
+
         const jsonRows: any[] = [];
         for (let i = 1; i < lines.length; i++) {
-          const matches = lines[i].match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || lines[i].split(',');
+          
+          // 💡 修复 2：使用更严谨的逐字符解析器，完美解决空字段错位和引号内逗号的问题
+          const matches: string[] = [];
+          let currentVal = '';
+          let inQuotes = false;
+          const lineStr = lines[i];
+          
+          for (let j = 0; j < lineStr.length; j++) {
+            const char = lineStr[j];
+            if (char === '"') {
+              if (inQuotes && lineStr[j + 1] === '"') {
+                currentVal += '"';
+                j++;
+              } else {
+                inQuotes = !inQuotes;
+              }
+            } else if (char === ',' && !inQuotes) {
+              matches.push(currentVal);
+              currentVal = '';
+            } else {
+              currentVal += char;
+            }
+          }
+          matches.push(currentVal);
+
           const rowData: any = {};
           
           headers.forEach((header, index) => {
             let val = matches[index] ? matches[index].trim() : '';
             val = val.replace(/^["']|["']$/g, '');
             
-            // 💡 智能清洗 1：价格去逗号和符号
             if (priceColumns.includes(header)) {
                const cleanedVal = val.replace(/[¥,]/g, '').trim();
                rowData[header] = cleanedVal === '' ? null : Number(cleanedVal);
             } 
-            // 💡 智能清洗 2：如果画像URL里带了 =IMAGE("网址") 公式，强行剥掉外壳提取网址！
             else if (header === '画像URL' || header === '画像') {
                const imgMatch = val.match(/=IMAGE\(['"]?(.*?)['"]?\)/i);
                rowData[header] = imgMatch ? imgMatch[1] : val;
@@ -253,6 +278,10 @@ export default function Home() {
                rowData[header] = val;
             }
           });
+
+          // 💡 修复 3：将生成的批次号自动注入到每一行数据中
+          rowData['upload_batch'] = batchId;
+
           jsonRows.push(rowData);
         }
 
@@ -579,7 +608,6 @@ export default function Home() {
         <div className="modal-overlay" style={{ display: 'flex' }} onClick={() => setActiveModalItem(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <button className="modal-close" onClick={() => setActiveModalItem(null)}>×</button>
-            {/* 💡 修复：弹窗图片补充 onError 拦截保护 */}
             <img 
               className="modal-img" 
               style={{ objectFit: 'contain', backgroundColor: '#fafafa' }} 
