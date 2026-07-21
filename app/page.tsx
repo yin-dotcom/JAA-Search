@@ -321,7 +321,7 @@ export default function Home() {
     };
     
     // 💡 修复 2：将编码改为 Shift_JIS，专门适配日本 Excel 导出的 CSV 防止乱码
-    reader.readAsText(file, 'Shift_JIS');
+    reader.readAsText(file, 'utf-8');
   };
 
   const handleDownloadCSV = () => {
