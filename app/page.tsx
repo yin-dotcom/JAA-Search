@@ -224,47 +224,64 @@ export default function Home() {
         const text = event.target?.result as string;
         if (!text) throw new Error('読み込めませんでした。');
 
-        const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
-        if (lines.length < 2) throw new Error('データがありません。');
+        // 💡 修复 1：使用全局逐字符状态机解析（完美处理单元格内换行、内部逗号）
+        const parsedRows: string[][] = [];
+        let currentRow: string[] = [];
+        let currentVal = '';
+        let inQuotes = false;
 
-        const headers = lines[0].split(',').map(h => h.replace(/^["']|["']$/g, '').trim());
+        for (let i = 0; i < text.length; i++) {
+          const char = text[i];
+          const nextChar = text[i + 1];
+
+          if (char === '"') {
+            if (inQuotes && nextChar === '"') {
+              currentVal += '"'; // 处理转义的双引号
+              i++; // 跳过下一个引号
+            } else {
+              inQuotes = !inQuotes; // 切换引号状态
+            }
+          } else if (char === ',' && !inQuotes) {
+            currentRow.push(currentVal);
+            currentVal = '';
+          } else if ((char === '\n' || char === '\r') && !inQuotes) {
+            // 遇到真正的行结束符（且不在引号内）
+            if (char === '\r' && nextChar === '\n') i++; 
+            currentRow.push(currentVal);
+            
+            // 忽略完全空白的空行
+            if (currentRow.some(val => val.trim() !== '')) {
+              parsedRows.push(currentRow);
+            }
+            currentRow = [];
+            currentVal = '';
+          } else {
+            currentVal += char;
+          }
+        }
+        // 处理最后一行
+        if (currentVal || currentRow.length > 0) {
+          currentRow.push(currentVal);
+          if (currentRow.some(val => val.trim() !== '')) parsedRows.push(currentRow);
+        }
+
+        if (parsedRows.length < 2) throw new Error('データがありません。');
+
+        // 获取表头
+        const headers = parsedRows[0].map(h => h.replace(/^["']|["']$/g, '').trim());
         const priceColumns = ['自社指値', '指値', '指値2', '1番手入札', '2番手入札', '3番手入札'];
 
-        // 💡 修复 1：生成批次号 (Batch ID)
+        // 生成批次号 (Batch ID)
         const batchId = `batch_${new Date().getTime()}`;
 
         const jsonRows: any[] = [];
-        for (let i = 1; i < lines.length; i++) {
-          
-          // 💡 修复 2：使用更严谨的逐字符解析器，完美解决空字段错位和引号内逗号的问题
-          const matches: string[] = [];
-          let currentVal = '';
-          let inQuotes = false;
-          const lineStr = lines[i];
-          
-          for (let j = 0; j < lineStr.length; j++) {
-            const char = lineStr[j];
-            if (char === '"') {
-              if (inQuotes && lineStr[j + 1] === '"') {
-                currentVal += '"';
-                j++;
-              } else {
-                inQuotes = !inQuotes;
-              }
-            } else if (char === ',' && !inQuotes) {
-              matches.push(currentVal);
-              currentVal = '';
-            } else {
-              currentVal += char;
-            }
-          }
-          matches.push(currentVal);
-
+        for (let i = 1; i < parsedRows.length; i++) {
+          const matches = parsedRows[i];
           const rowData: any = {};
           
           headers.forEach((header, index) => {
             let val = matches[index] ? matches[index].trim() : '';
-            val = val.replace(/^["']|["']$/g, '');
+            val = val.replace(/^["']|["']$/g, ''); // 去除外层多余引号
             
             if (priceColumns.includes(header)) {
                const cleanedVal = val.replace(/[¥,]/g, '').trim();
@@ -279,9 +296,8 @@ export default function Home() {
             }
           });
 
-          // 💡 修复 3：将生成的批次号自动注入到每一行数据中
+          // 注入批次号
           rowData['upload_batch'] = batchId;
-
           jsonRows.push(rowData);
         }
 
@@ -303,7 +319,9 @@ export default function Home() {
         if (fileInputRef.current) fileInputRef.current.value = '';
       }
     };
-    reader.readAsText(file, 'utf-8');
+    
+    // 💡 修复 2：将编码改为 Shift_JIS，专门适配日本 Excel 导出的 CSV 防止乱码
+    reader.readAsText(file, 'Shift_JIS');
   };
 
   const handleDownloadCSV = () => {
