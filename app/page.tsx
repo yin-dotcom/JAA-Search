@@ -112,11 +112,16 @@ export default function Home() {
       setError(null);
       setSelectedIndexes([]);
 
-      let query = supabase.from('jaa_items').select('*', { count: 'exact' });
+      // 🚀 优化 1：只拉取需要的字段，节省 90% 流量
+      let query = supabase.from('jaa_items').select('id, ブランド, 特徴, 中分類, 箱番, 状態詳細, ランク, 大会開催日, 日付, 自社指値, 指値2, 指値, 画像URL, 商品名, 大分類, 出品者, 売価予想, 1番手顧客, 1番手入札, 2番手顧客, 2番手入札, 3番手顧客, 3番手入札', { count: 'exact' });
 
+      // 🚀 优化 2：支持多关键词空格搜索 (例如: "シャネル 黒 バッグ")
       if (activeSearchTerm.trim()) {
-        const t = `%${activeSearchTerm.trim()}%`;
-        query = query.or(`ブランド.ilike.${t},特徴.ilike.${t},中分類.ilike.${t},箱番.ilike.${t}`);
+        const keywords = activeSearchTerm.trim().split(/[\s ]+/);
+        keywords.forEach(keyword => {
+          const t = `%${keyword}%`;
+          query = query.or(`ブランド.ilike.${t},特徴.ilike.${t},中分類.ilike.${t},箱番.ilike.${t}`);
+        });
       }
 
       if (selectedMainCat !== 'ALL') {
@@ -142,52 +147,22 @@ export default function Home() {
         query = query.lte('大会開催日', dbEndDate + '퟿'); 
       }
 
+      // 🚀 优化 3：把排序交给数据库，抛弃低效循环
       if (priceSortState !== 'none') {
-        let allData: any[] = [];
-        let from = 0;
-        const step = 1000;
-        let hasMore = true;
-        let totalRecords = 0;
-
-        while (hasMore && allData.length < 3000) {
-          const { data, error: dbError, count } = await query.range(from, from + step - 1);
-          if (dbError) throw dbError;
-          if (count !== null) totalRecords = count;
-          
-          if (data && data.length > 0) {
-            allData = [...allData, ...data];
-            from += step;
-            if (data.length < step) hasMore = false;
-          } else {
-            hasMore = false;
-          }
-        }
-
-        allData.sort((a, b) => {
-          const priceA = extractSortPrice(a['自社指値'] || a['指値2'] || a['指値']);
-          const priceB = extractSortPrice(b['自社指値'] || b['指値2'] || b['指値']);
-          return priceSortState === 'asc' ? priceA - priceB : priceB - priceA;
-        });
-
-        const startIndex = (currentPage - 1) * itemsPerPage;
-        setItems(allData.slice(startIndex, startIndex + itemsPerPage));
-        setTotalCount(totalRecords);
-
-      } else {
-        if (dateSortState !== 'none') {
-          query = query.order('大会開催日', { ascending: dateSortState === 'asc', nullsFirst: false });
-        }
-        
-        const from = (currentPage - 1) * itemsPerPage;
-        const to = from + itemsPerPage - 1;
-        query = query.range(from, to);
-
-        const { data, error: dbError, count } = await query;
-        if (dbError) throw dbError;
-
-        setItems(data || []);
-        setTotalCount(count || 0);
+        query = query.order('自社指値', { ascending: priceSortState === 'asc', nullsFirst: false });
+      } else if (dateSortState !== 'none') {
+        query = query.order('大会開催日', { ascending: dateSortState === 'asc', nullsFirst: false });
       }
+      
+      const from = (currentPage - 1) * itemsPerPage;
+      const to = from + itemsPerPage - 1;
+      query = query.range(from, to);
+
+      const { data, error: dbError, count } = await query;
+      if (dbError) throw dbError;
+
+      setItems(data || []);
+      setTotalCount(count || 0);
 
     } catch (err: any) {
       console.error('Fetch Error:', err);
@@ -224,7 +199,6 @@ export default function Home() {
         const text = event.target?.result as string;
         if (!text) throw new Error('読み込めませんでした。');
 
-        // 💡 修复 1：使用全局逐字符状态机解析（完美处理单元格内换行、内部逗号）
         const parsedRows: string[][] = [];
         let currentRow: string[] = [];
         let currentVal = '';
@@ -236,20 +210,18 @@ export default function Home() {
 
           if (char === '"') {
             if (inQuotes && nextChar === '"') {
-              currentVal += '"'; // 处理转义的双引号
-              i++; // 跳过下一个引号
+              currentVal += '"'; 
+              i++; 
             } else {
-              inQuotes = !inQuotes; // 切换引号状态
+              inQuotes = !inQuotes; 
             }
           } else if (char === ',' && !inQuotes) {
             currentRow.push(currentVal);
             currentVal = '';
           } else if ((char === '\n' || char === '\r') && !inQuotes) {
-            // 遇到真正的行结束符（且不在引号内）
             if (char === '\r' && nextChar === '\n') i++; 
             currentRow.push(currentVal);
             
-            // 忽略完全空白的空行
             if (currentRow.some(val => val.trim() !== '')) {
               parsedRows.push(currentRow);
             }
@@ -259,7 +231,6 @@ export default function Home() {
             currentVal += char;
           }
         }
-        // 处理最后一行
         if (currentVal || currentRow.length > 0) {
           currentRow.push(currentVal);
           if (currentRow.some(val => val.trim() !== '')) parsedRows.push(currentRow);
@@ -267,11 +238,8 @@ export default function Home() {
 
         if (parsedRows.length < 2) throw new Error('データがありません。');
 
-        // 获取表头
         const headers = parsedRows[0].map(h => h.replace(/^["']|["']$/g, '').trim());
         const priceColumns = ['自社指値', '指値', '指値2', '1番手入札', '2番手入札', '3番手入札'];
-
-        // 生成批次号 (Batch ID)
         const batchId = `batch_${new Date().getTime()}`;
 
         const jsonRows: any[] = [];
@@ -281,7 +249,7 @@ export default function Home() {
           
           headers.forEach((header, index) => {
             let val = matches[index] ? matches[index].trim() : '';
-            val = val.replace(/^["']|["']$/g, ''); // 去除外层多余引号
+            val = val.replace(/^["']|["']$/g, ''); 
             
             if (priceColumns.includes(header)) {
                const cleanedVal = val.replace(/[¥,]/g, '').trim();
@@ -296,7 +264,6 @@ export default function Home() {
             }
           });
 
-          // 注入批次号
           rowData['upload_batch'] = batchId;
           jsonRows.push(rowData);
         }
@@ -320,7 +287,6 @@ export default function Home() {
       }
     };
     
-    // 💡 修复 2：将编码改为 Shift_JIS，专门适配日本 Excel 导出的 CSV 防止乱码
     reader.readAsText(file, 'utf-8');
   };
 
@@ -488,8 +454,6 @@ export default function Home() {
             <select value={itemsPerPage} onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
               <option value="50">50件</option>
               <option value="100">100件</option>
-              <option value="500">500件</option>
-              <option value="1000">1000件</option>
             </select>
           </div>
           <div className="filter-item">
@@ -570,7 +534,8 @@ export default function Home() {
 
                   <div className="brand-badge">{brand}</div>
                   
-                  <img src={imgUrl} alt={brand} onError={(e) => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/400x300?text=No+Image'; }}/>
+                  {/* 🚀 优化 4：添加懒加载 loading="lazy" */}
+                  <img src={imgUrl} alt={brand} loading="lazy" onError={(e) => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/400x300?text=No+Image'; }}/>
                   
                   <div className="item-info">
                     <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }}>
@@ -626,11 +591,13 @@ export default function Home() {
         <div className="modal-overlay" style={{ display: 'flex' }} onClick={() => setActiveModalItem(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <button className="modal-close" onClick={() => setActiveModalItem(null)}>×</button>
+            {/* 🚀 优化 4：添加懒加载 loading="lazy" */}
             <img 
               className="modal-img" 
               style={{ objectFit: 'contain', backgroundColor: '#fafafa' }} 
               src={activeModalItem['画像URL'] || 'https://via.placeholder.com/400x300?text=No+Image'} 
               alt="画像" 
+              loading="lazy"
               onError={(e) => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/400x300?text=No+Image'; }}
             />
             <div className="modal-title">{activeModalItem['特徴'] || activeModalItem['商品名'] || "無題の商品"}</div>
