@@ -113,7 +113,7 @@ export default function Home() {
       setSelectedIndexes([]);
 
       // 🚀 优化 1：只拉取需要的字段，节省 90% 流量
-      let query = supabase.from('jaa_items').select('ブランド, 特徴, 中分類, 箱番, 状態詳細, ランク, 大会開催日, 日付, 自社指値, 指値2, 指値, 画像URL, 商品名, 大分類, 出品者, 売価予想, 1番手顧客, 1番手入札, 2番手顧客, 2番手入札, 3番手顧客, 3番手入札', { count: 'exact' });
+     let query = supabase.from('jaa_items').select('箱番, ブランド, 中分類, 特徴, 指値, 出品者, 状態詳細, 自社指値, 売価予想, 1番手顧客, 1番手入札, 2番手顧客, 2番手入札, 3番手顧客, 3番手入札, 画像URL, 大会開催日', { count: 'exact' });
 
       // 🚀 优化 2：支持多关键词空格搜索 (例如: "シャネル 黒 バッグ")
       if (activeSearchTerm.trim()) {
