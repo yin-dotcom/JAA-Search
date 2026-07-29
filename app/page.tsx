@@ -45,7 +45,8 @@ export default function Home() {
   const [dateSortState, setDateSortState] = useState<'none' | 'asc' | 'desc'>('none');
 
   const [activeModalItem, setActiveModalItem] = useState<any | null>(null);
-  const [selectedIndexes, setSelectedIndexes] = useState<number[]>([]);
+  // ✅ 长期记忆库：直接保存选中的整个商品对象
+  const [selectedItemsGlobal, setSelectedItemsGlobal] = useState<any[]>([]);
 
   const extractSortPrice = (val: any): number => {
     if (!val) return 0;
@@ -110,12 +111,11 @@ export default function Home() {
     try {
       setLoading(true);
       setError(null);
-      setSelectedIndexes([]);
+      // ✅ 移除了清空状态的代码，翻页搜索不再丢失勾选
 
-      // 🚀 优化 1：只拉取需要的字段，节省 90% 流量
-     let query = supabase.from('jaa_items').select('箱番, ブランド, 中分類, 特徴, 指値, 出品者, 状態詳細, 自社指値, 売価予想, 1番手顧客, 1番手入札, 2番手顧客, 2番手入札, 3番手顧客, 3番手入札, 画像URL, 大会開催日', { count: 'exact' });
+      // ✅ 添加了 id 到 select 查询语句中
+      let query = supabase.from('jaa_items').select('id, 箱番, ブランド, 中分類, 特徴, 指値, 出品者, 状態詳細, 自社指値, 売価予想, 1番手顧客, 1番手入札, 2番手顧客, 2番手入札, 3番手顧客, 3番手入札, 画像URL, 大会開催日', { count: 'exact' });
 
-      // 🚀 优化 2：支持多关键词空格搜索 (例如: "シャネル 黒 バッグ")
       if (activeSearchTerm.trim()) {
         const keywords = activeSearchTerm.trim().split(/[\s ]+/);
         keywords.forEach(keyword => {
@@ -147,7 +147,6 @@ export default function Home() {
         query = query.lte('大会開催日', dbEndDate + '퟿'); 
       }
 
-      // 🚀 优化 3：把排序交给数据库，抛弃低效循环
       if (priceSortState !== 'none') {
         query = query.order('自社指値', { ascending: priceSortState === 'asc', nullsFirst: false });
       } else if (dateSortState !== 'none') {
@@ -290,18 +289,15 @@ export default function Home() {
     reader.readAsText(file, 'utf-8');
   };
 
+  // ✅ 完全修改后的下载逻辑，直接从长期仓库生成 CSV
   const handleDownloadCSV = () => {
-    if (selectedIndexes.length === 0) return;
+    if (selectedItemsGlobal.length === 0) return;
 
-    const selectedItems = items.filter((_, index) => selectedIndexes.includes(index));
-    if (selectedItems.length === 0) return;
-
-    const headers = Object.keys(selectedItems[0]).filter(k => k !== 'id');
-
+    const headers = Object.keys(selectedItemsGlobal[0]).filter(k => k !== 'id');
     const csvRows = [];
     csvRows.push(headers.join(',')); 
 
-    selectedItems.forEach(item => {
+    selectedItemsGlobal.forEach(item => {
       const row = headers.map(header => {
         let val = item[header] === null || item[header] === undefined ? '' : String(item[header]);
         if (val.includes(',') || val.includes('\n') || val.includes('"')) {
@@ -388,28 +384,39 @@ export default function Home() {
           </div>
           
           <div style={{ marginLeft: '10px', display: 'flex', gap: '6px' }}>
+            {/* ✅ 修改：当前页的全选/取消全选，绑定全局仓库 */}
             <button 
               className="btn-search" 
               style={{ background: '#78909c' }} 
               onClick={() => {
-                if (selectedIndexes.length === items.length && items.length > 0) {
-                  setSelectedIndexes([]); 
+                const allSelectedOnPage = items.length > 0 && items.every(item => selectedItemsGlobal.some(s => s.id === item.id));
+                if (allSelectedOnPage) {
+                  setSelectedItemsGlobal(prev => prev.filter(p => !items.find(i => i.id === p.id)));
                 } else {
-                  setSelectedIndexes(items.map((_, idx) => idx)); 
+                  const newItems = items.filter(item => !selectedItemsGlobal.some(s => s.id === item.id));
+                  setSelectedItemsGlobal(prev => [...prev, ...newItems]);
                 }
               }}
             >
-              {selectedIndexes.length === items.length && items.length > 0 ? "全解除" : "全選択"}
+              {items.length > 0 && items.every(item => selectedItemsGlobal.some(s => s.id === item.id)) ? "現在のページ解除" : "現在のページ全選択"}
             </button>
 
+            {/* ✅ 修改：下载按钮绑定全局仓库 */}
             <button 
               className="btn-search" 
-              style={{ background: selectedIndexes.length > 0 ? '#42a5f5' : '#bbdefb', cursor: selectedIndexes.length > 0 ? 'pointer' : 'not-allowed' }} 
+              style={{ background: selectedItemsGlobal.length > 0 ? '#42a5f5' : '#bbdefb', cursor: selectedItemsGlobal.length > 0 ? 'pointer' : 'not-allowed' }} 
               onClick={handleDownloadCSV}
-              disabled={selectedIndexes.length === 0}
+              disabled={selectedItemsGlobal.length === 0}
             >
-              CSVダウンロード ({selectedIndexes.length})
+              CSVダウンロード ({selectedItemsGlobal.length})
             </button>
+
+            {/* ✅ 新增：一键清空所有已选商品的按钮 */}
+            {selectedItemsGlobal.length > 0 && (
+              <button className="btn-search" style={{ background: '#ff9800' }} onClick={() => setSelectedItemsGlobal([])}>
+                選択リセット
+              </button>
+            )}
 
             <input type="file" accept=".csv" ref={fileInputRef} style={{ display: 'none' }} onChange={handleCSVUpload} disabled={uploading}/>
             <button className="btn-search" style={{ background: '#ec407a' }} onClick={() => fileInputRef.current?.click()} disabled={uploading}>
@@ -512,7 +519,8 @@ export default function Home() {
               const c3Name = item['3番手顧客'] || '';
               const c3Bid = formatPrice(item['3番手入札']);
 
-              const isSelected = selectedIndexes.includes(index);
+              // ✅ 修改：用仓库里的真实商品 id 来判断是否勾选
+              const isSelected = selectedItemsGlobal.some(s => s.id === item.id);
 
               return (
                 <div 
@@ -524,8 +532,11 @@ export default function Home() {
                     className="checkbox-wrapper" 
                     onClick={(e) => {
                       e.stopPropagation();
-                      setSelectedIndexes(prev => 
-                        prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]
+                      // ✅ 修改：勾选时将完整的商品对象加入/移出仓库
+                      setSelectedItemsGlobal(prev => 
+                        prev.some(s => s.id === item.id) 
+                          ? prev.filter(s => s.id !== item.id) 
+                          : [...prev, item]
                       );
                     }}
                   >
@@ -534,7 +545,6 @@ export default function Home() {
 
                   <div className="brand-badge">{brand}</div>
                   
-                  {/* 🚀 优化 4：添加懒加载 loading="lazy" */}
                   <img src={imgUrl} alt={brand} loading="lazy" onError={(e) => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/400x300?text=No+Image'; }}/>
                   
                   <div className="item-info">
@@ -586,12 +596,10 @@ export default function Home() {
         </div>
       )}
 
-      {/* 弹窗 */}
       {activeModalItem && (
         <div className="modal-overlay" style={{ display: 'flex' }} onClick={() => setActiveModalItem(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <button className="modal-close" onClick={() => setActiveModalItem(null)}>×</button>
-            {/* 🚀 优化 4：添加懒加载 loading="lazy" */}
             <img 
               className="modal-img" 
               style={{ objectFit: 'contain', backgroundColor: '#fafafa' }} 
