@@ -111,7 +111,6 @@ export default function Home() {
     try {
       setLoading(true);
       setError(null);
-      // ✅ 移除了清空状态的代码，翻页搜索不再丢失勾选
 
       // ✅ 添加了 id 到 select 查询语句中
       let query = supabase.from('jaa_items').select('id, 箱番, ブランド, 中分類, 特徴, 指値, 出品者, 状態詳細, 自社指値, 売価予想, 1番手顧客, 1番手入札, 2番手顧客, 2番手入札, 3番手顧客, 3番手入札, 画像URL, 大会開催日', { count: 'exact' });
@@ -267,12 +266,25 @@ export default function Home() {
           jsonRows.push(rowData);
         }
 
-        setUploadStatus(`Supabaseへ ${jsonRows.length} 件登録中...`);
+        // 🚨 【核心修改 2】：将一次性 Insert 改为 500 条分批 Upsert
+        const BATCH_SIZE = 500;
+        let successCount = 0;
 
-        const { error: insertError } = await supabase.from('jaa_items').insert(jsonRows);
-        if (insertError) throw insertError;
+        for (let i = 0; i < jsonRows.length; i += BATCH_SIZE) {
+          const chunk = jsonRows.slice(i, i + BATCH_SIZE);
+          
+          setUploadStatus(`Supabaseへ送信中... (${i + 1} 〜 ${Math.min(i + BATCH_SIZE, jsonRows.length)} 件)`);
+          
+          // 使用 upsert，基于 id 去重覆盖
+          const { error: upsertError } = await supabase
+            .from('jaa_items')
+            .upsert(chunk, { onConflict: 'id' });
 
-        setUploadStatus('🎉 アップロード成功！');
+          if (upsertError) throw upsertError;
+          successCount += chunk.length;
+        }
+
+        setUploadStatus(`🎉 アップロード成功！計 ${successCount} 件のデータを更新しました。`);
         setTimeout(() => setUploadStatus(null), 4000);
         
         fetchRealData(); 
@@ -286,10 +298,10 @@ export default function Home() {
       }
     };
     
-    reader.readAsText(file, 'utf-8');
+    // 🚨 【核心修改 1】：把 utf-8 改成了 Shift_JIS，完美适配日本同事从 Excel 导出的 CSV
+    reader.readAsText(file, 'Shift_JIS');
   };
 
-  // ✅ 完全修改后的下载逻辑，直接从长期仓库生成 CSV
   const handleDownloadCSV = () => {
     if (selectedItemsGlobal.length === 0) return;
 
@@ -384,7 +396,6 @@ export default function Home() {
           </div>
           
           <div style={{ marginLeft: '10px', display: 'flex', gap: '6px' }}>
-            {/* ✅ 修改：当前页的全选/取消全选，绑定全局仓库 */}
             <button 
               className="btn-search" 
               style={{ background: '#78909c' }} 
@@ -401,7 +412,6 @@ export default function Home() {
               {items.length > 0 && items.every(item => selectedItemsGlobal.some(s => s.id === item.id)) ? "現在のページ解除" : "現在のページ全選択"}
             </button>
 
-            {/* ✅ 修改：下载按钮绑定全局仓库 */}
             <button 
               className="btn-search" 
               style={{ background: selectedItemsGlobal.length > 0 ? '#42a5f5' : '#bbdefb', cursor: selectedItemsGlobal.length > 0 ? 'pointer' : 'not-allowed' }} 
@@ -411,7 +421,6 @@ export default function Home() {
               CSVダウンロード ({selectedItemsGlobal.length})
             </button>
 
-            {/* ✅ 新增：一键清空所有已选商品的按钮 */}
             {selectedItemsGlobal.length > 0 && (
               <button className="btn-search" style={{ background: '#ff9800' }} onClick={() => setSelectedItemsGlobal([])}>
                 選択リセット
@@ -519,7 +528,6 @@ export default function Home() {
               const c3Name = item['3番手顧客'] || '';
               const c3Bid = formatPrice(item['3番手入札']);
 
-              // ✅ 修改：用仓库里的真实商品 id 来判断是否勾选
               const isSelected = selectedItemsGlobal.some(s => s.id === item.id);
 
               return (
@@ -532,7 +540,6 @@ export default function Home() {
                     className="checkbox-wrapper" 
                     onClick={(e) => {
                       e.stopPropagation();
-                      // ✅ 修改：勾选时将完整的商品对象加入/移出仓库
                       setSelectedItemsGlobal(prev => 
                         prev.some(s => s.id === item.id) 
                           ? prev.filter(s => s.id !== item.id) 
