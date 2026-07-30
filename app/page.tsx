@@ -64,15 +64,24 @@ export default function Home() {
     return !isNaN(num) && num > 0 ? `¥${num.toLocaleString()}` : strVal;
   };
 
-  // ✅ 【核心修复】智能分离器升级：完美识别 SA-A 等带有短横线的纯字母组合
+  // ✅ 终极智能提取器：加入“ヴィン”和“ヴィンテージ”白名单
   const parseStatus = (statusStr: string) => {
     if (!statusStr) return { rank: '', text: '' };
-    // 匹配如 S, A-, SA-A 等纯字母或带有连字符、加减号的完整 Rank 字符串
-    const match = statusStr.match(/^([NSABCD][A-Z]*(?:-[A-Z]+)?[-+]?)(?:\s+|・| )*(.*)$/i);
+    const safeStr = statusStr.trim();
+
+    // 匹配开头可选的ヴィン/ヴィンテージ，以及后面的英文字母和符号
+    // 使用 ^ 限定从字符串头部开始匹配
+    const rankRegex = /^(?:ヴィン(?:テージ)?\s*)?[a-zA-Zａ-ｚＡ-Ｚ\+\-\~\～\＋\－]+(?:\s+[a-zA-Zａ-ｚＡ-Ｚ\+\-\~\～\＋\－]+)*/i;
+    const match = safeStr.match(rankRegex);
+
     if (match) {
-      return { rank: match[1].toUpperCase(), text: match[2].trim() };
+      const rank = match[0].trim();
+      // 使用 substring 安全地剔除头部匹配到的 Rank，保留后面的所有描述文本
+      const text = safeStr.substring(match[0].length).replace(/^[・\s]+|[・\s]+$/g, '').trim();
+      return { rank: rank.toUpperCase(), text };
     }
-    return { rank: '', text: statusStr.trim() };
+
+    return { rank: '', text: safeStr };
   };
 
   const calculateAvgBid = (i1: any, i2: any, i3: any) => {
