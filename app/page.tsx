@@ -40,6 +40,7 @@ export default function Home() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
+  // ✅ 默认显示 100 件
   const [itemsPerPage, setItemsPerPage] = useState(100);
   const [currentPage, setCurrentPage] = useState(1);
   const [priceSortState, setPriceSortState] = useState<'none' | 'asc' | 'desc'>('none');
@@ -64,7 +65,7 @@ export default function Home() {
     return !isNaN(num) && num > 0 ? `¥${num.toLocaleString()}` : strVal;
   };
 
-  // ✅ 状态文字智能分离器（分离字母Rank和后续文字）
+  // 状态文字智能分离器
   const parseStatus = (statusStr: string) => {
     if (!statusStr) return { rank: '', text: '' };
     const match = statusStr.match(/^([SABCD][A-Z]?[-+]?)(?:\s+|・| )*(.*)$/i);
@@ -74,7 +75,7 @@ export default function Home() {
     return { rank: '', text: statusStr.trim() };
   };
 
-  // ✅ 计算前三入札的平均值
+  // 计算前三入札的平均值
   const calculateAvgBid = (i1: any, i2: any, i3: any) => {
     const p1 = extractSortPrice(i1);
     const p2 = extractSortPrice(i2);
@@ -495,11 +496,13 @@ export default function Home() {
               <option value="手競り">手競り</option>
             </select>
           </div>
+          {/* ✅ 这里的下拉选项已经修改为 100, 500, 1000 */}
           <div className="filter-item">
             <span>表示件数:</span>
             <select value={itemsPerPage} onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
-              <option value="50">50件</option>
               <option value="100">100件</option>
+              <option value="500">500件</option>
+              <option value="1000">1000件</option>
             </select>
           </div>
 
@@ -537,7 +540,6 @@ export default function Home() {
               const feature = item['特徴'] || item['商品名'] || '-';
               
               const rawStatus = item['状態詳細'] || item['ランク'] || '';
-              // ✅ 解析 Rank 和文字状态
               const { rank, text: statusText } = parseStatus(rawStatus);
 
               const eventDate = item['大会開催日'] || item['日付'] || '';
@@ -551,7 +553,6 @@ export default function Home() {
               const c3Name = item['3番手顧客'] || '';
               const c3Bid = formatPrice(item['3番手入札']);
 
-              // ✅ 修正条件：只要有价格或者名字，这一行就在卡片上显示
               const showC1 = c1Name || item['1番手入札'];
               const showC2 = c2Name || item['2番手入札'];
               const showC3 = c3Name || item['3番手入札'];
@@ -592,7 +593,6 @@ export default function Home() {
                     <div className="item-feat" title={feature}>{feature}</div>
 
                     <div className="tags-container">
-                      {/* ✅ 列表中也将 Rank 和 状态文字分拆为完全独立的两个标签 */}
                       {rank && <span className="tag-rank">{rank}</span>}
                       {statusText && <span className="tag-status">{statusText}</span>}
                     </div>
@@ -643,7 +643,6 @@ export default function Home() {
             />
             <div className="modal-title">{activeModalItem['特徴'] || activeModalItem['商品名'] || "無題の商品"}</div>
             
-            {/* ✅ 弹窗中动态提取 Rank 与状态 */}
             {(() => {
               const rawModalStatus = activeModalItem['状態詳細'] || activeModalItem['ランク'] || '';
               const { rank: modalRank, text: modalStatusText } = parseStatus(rawModalStatus);
@@ -653,7 +652,6 @@ export default function Home() {
                   <p><b>ブランド:</b> {activeModalItem['ブランド'] || 'なし'}</p>
                   <p><b>カテゴリ:</b> {activeModalItem['大分類'] || ''} &gt; {activeModalItem['中分類'] || ''}</p>
                   
-                  {/* ✅ 在弹窗中分开显示两行：Rank单独一行加粗粉色，状态详细另外一行 */}
                   <p><b>ランク:</b> {modalRank ? <span style={{ color: '#f06292', fontWeight: 'bold' }}>{modalRank}</span> : 'なし'}</p>
                   {modalStatusText && <p><b>状態詳細:</b> {modalStatusText}</p>}
 
@@ -669,7 +667,6 @@ export default function Home() {
 
                   <div style={{ marginTop: '10px', padding: '8px', background: '#fff0f5', borderRadius: '8px', fontSize: '12px' }}>
                     
-                    {/* ✅ 弹窗里的买家信息：如果没有名字就留空，不再显示横杠 */}
                     {(activeModalItem['1番手顧客'] || activeModalItem['1番手入札']) && (
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                         <span>① {activeModalItem['1番手顧客'] || ''}</span>
@@ -746,7 +743,6 @@ export default function Home() {
         .item-feat { font-size: 13px; margin: 4px 0 8px 0; height: 3em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.5; color: var(--text-main); }
         .tags-container { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; font-size: 11px; margin-top: auto; }
         
-        /* ✅ 新增：在外部卡片里分离的 Rank和状态 的独立 CSS 样式 */
         .tag-rank { background: #fff0f5; color: #d81b60; padding: 4px 8px; border-radius: 4px; border: 1px solid #f8bbd0; font-weight: bold; width: fit-content; line-height: 1.3; }
         .tag-status { background: #f5f5f5; color: #4a4a4a; padding: 4px 8px; border-radius: 4px; border: 1px solid #e0e0e0; width: fit-content; line-height: 1.3; }
         
