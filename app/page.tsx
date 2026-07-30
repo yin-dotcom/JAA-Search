@@ -36,6 +36,7 @@ export default function Home() {
   const [selectedMainCat, setSelectedMainCat] = useState('ALL');
   const [selectedSubCat, setSelectedSubCat] = useState('ALL');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
+  const [selectedMethod, setSelectedMethod] = useState('ALL'); // ✅ 新增：開催方法(入札/手競り)
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -45,7 +46,6 @@ export default function Home() {
   const [dateSortState, setDateSortState] = useState<'none' | 'asc' | 'desc'>('none');
 
   const [activeModalItem, setActiveModalItem] = useState<any | null>(null);
-  // ✅ 长期记忆库：直接保存选中的整个商品对象
   const [selectedItemsGlobal, setSelectedItemsGlobal] = useState<any[]>([]);
 
   const extractSortPrice = (val: any): number => {
@@ -62,6 +62,29 @@ export default function Home() {
     
     const num = parseFloat(strVal.replace(/[¥,]/g, '').trim());
     return !isNaN(num) && num > 0 ? `¥${num.toLocaleString()}` : strVal;
+  };
+
+  // ✅ 新增：状态文字智能分离器（分离字母Rank和后续文字）
+  const parseStatus = (statusStr: string) => {
+    if (!statusStr) return { rank: '', text: '' };
+    // 匹配 S, SA, A-, B+, BC 等开头的级别，然后截取后续文本
+    const match = statusStr.match(/^([SABCD][A-Z]?[-+]?)(?:\s+|・| )*(.*)$/i);
+    if (match) {
+      return { rank: match[1].toUpperCase(), text: match[2].trim() };
+    }
+    return { rank: '', text: statusStr.trim() };
+  };
+
+  // ✅ 新增：计算前三入札的平均值
+  const calculateAvgBid = (i1: any, i2: any, i3: any) => {
+    const p1 = extractSortPrice(i1);
+    const p2 = extractSortPrice(i2);
+    const p3 = extractSortPrice(i3);
+    let sum = 0, count = 0;
+    if (p1 > 0) { sum += p1; count++; }
+    if (p2 > 0) { sum += p2; count++; }
+    if (p3 > 0) { sum += p3; count++; }
+    return count > 0 ? Math.round(sum / count) : 0;
   };
 
   useEffect(() => {
@@ -112,7 +135,6 @@ export default function Home() {
       setLoading(true);
       setError(null);
 
-      // ✅ 添加了 id 到 select 查询语句中
       let query = supabase.from('jaa_items').select('id, 箱番, ブランド, 中分類, 特徴, 指値, 出品者, 状態詳細, 自社指値, 売価予想, 1番手顧客, 1番手入札, 2番手顧客, 2番手入札, 3番手顧客, 3番手入札, 画像URL, 大会開催日', { count: 'exact' });
 
       if (activeSearchTerm.trim()) {
@@ -135,6 +157,11 @@ export default function Home() {
         else if (selectedStatus === 'B') query = query.not('状態詳細', 'ilike', '%AB%').not('状態詳細', 'ilike', '%BC%');
         else if (selectedStatus === 'C') query = query.not('状態詳細', 'ilike', '%BC%');
         else if (selectedStatus === 'S') query = query.not('状態詳細', 'ilike', '%SA%');
+      }
+
+      // ✅ 识别大会举办日里面的手竞/入札类型
+      if (selectedMethod !== 'ALL') {
+        query = query.ilike('大会開催日', `%${selectedMethod}%`);
       }
       
       if (startDate) {
@@ -172,7 +199,7 @@ export default function Home() {
 
   useEffect(() => {
     fetchRealData();
-  }, [ activeSearchTerm, selectedMainCat, selectedSubCat, selectedStatus, startDate, endDate, currentPage, itemsPerPage, priceSortState, dateSortState ]);
+  }, [ activeSearchTerm, selectedMainCat, selectedSubCat, selectedStatus, selectedMethod, startDate, endDate, currentPage, itemsPerPage, priceSortState, dateSortState ]);
 
   const executeSearch = () => {
     setActiveSearchTerm(typedSearchTerm);
@@ -266,7 +293,6 @@ export default function Home() {
           jsonRows.push(rowData);
         }
 
-        // 🚨 【核心修改 2】：将一次性 Insert 改为 500 条分批 Upsert
         const BATCH_SIZE = 500;
         let successCount = 0;
 
@@ -275,7 +301,6 @@ export default function Home() {
           
           setUploadStatus(`Supabaseへ送信中... (${i + 1} 〜 ${Math.min(i + BATCH_SIZE, jsonRows.length)} 件)`);
           
-          // 使用 upsert，基于 id 去重覆盖
           const { error: upsertError } = await supabase
             .from('jaa_items')
             .upsert(chunk, { onConflict: 'id' });
@@ -298,7 +323,6 @@ export default function Home() {
       }
     };
     
-    // 🚨 【核心修改 1】：把 utf-8 改成了 Shift_JIS，完美适配日本同事从 Excel 导出的 CSV
     reader.readAsText(file, 'Shift_JIS');
   };
 
@@ -418,7 +442,7 @@ export default function Home() {
               onClick={handleDownloadCSV}
               disabled={selectedItemsGlobal.length === 0}
             >
-              CSVダウンロード ({selectedItemsGlobal.length})
+              CSV ({selectedItemsGlobal.length})
             </button>
 
             {selectedItemsGlobal.length > 0 && (
@@ -465,20 +489,21 @@ export default function Home() {
               {["ALL", "S", "SA", "A", "AB", "B", "BC", "C", "D"].map(status => <option key={status} value={status}>{status}</option>)}
             </select>
           </div>
+          {/* ✅ 新增：開催方法 筛选 */}
+          <div className="filter-item">
+            <span>開催方法:</span>
+            <select value={selectedMethod} onChange={(e) => { setSelectedMethod(e.target.value); setCurrentPage(1); }}>
+              <option value="ALL">すべて (ALL)</option>
+              <option value="入札">入札</option>
+              <option value="手競り">手競り</option>
+            </select>
+          </div>
           <div className="filter-item">
             <span>表示件数:</span>
             <select value={itemsPerPage} onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
               <option value="50">50件</option>
               <option value="100">100件</option>
             </select>
-          </div>
-          <div className="filter-item">
-            <span>開始日:</span>
-            <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }} />
-          </div>
-          <div className="filter-item">
-            <span>終了日:</span>
-            <input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setCurrentPage(1); }} />
           </div>
 
           <div className="filter-item" style={{ marginLeft: 'auto', gap: '10px' }}>
@@ -514,8 +539,10 @@ export default function Home() {
               const subCategory = item['中分類'] || '-';
               const feature = item['特徴'] || item['商品名'] || '-';
               
-              const status = item['状態詳細'] || item['ランク'] || '';
-              const boxNumber = item['箱番'] || item['商品番号'] || '-';
+              const rawStatus = item['状態詳細'] || item['ランク'] || '';
+              // ✅ 智能分离字母 Rank 和文字详情
+              const { rank, text: statusText } = parseStatus(rawStatus);
+
               const eventDate = item['大会開催日'] || item['日付'] || '';
 
               const ourSashine = formatPrice(item['自社指値'] || item['指値2'] || item['指値']);
@@ -550,25 +577,32 @@ export default function Home() {
                     <input type="checkbox" checked={isSelected} readOnly />
                   </div>
 
-                  <div className="brand-badge">{brand}</div>
+                  {/* ✅ 已移除图片悬浮的 brand-badge */}
                   
                   <img src={imgUrl} alt={brand} loading="lazy" onError={(e) => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/400x300?text=No+Image'; }}/>
                   
                   <div className="item-info">
                     <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }}>
-                      <span className="tag-box">📦 {boxNumber}</span>
+                      {/* ✅ 隐藏了箱番，大会開催日保留粉色标 */}
                       {eventDate && <span className="tag-date">🗓 {eventDate}</span>}
                     </div>
 
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span className="item-cat">{subCategory}</span>
+                      {/* ✅ 品牌名和中分类合并显示在此处 */}
+                      <span className="item-cat">{brand !== '不明' ? `${brand} / ` : ''}{subCategory}</span>
                     </div>
 
                     <div className="item-feat" title={feature}>{feature}</div>
 
                     <div className="tags-container">
-                      {status && <span className="tag-rank">{status}</span>}
-                      {item['出品者'] && <span className="tag-normal">{item['出品者']}</span>}
+                      {/* ✅ 状态分开显示：字母 Rank 红色加粗，文字普通显示 */}
+                      {(rank || statusText) && (
+                        <span className="tag-rank">
+                          {rank && <b style={{color: '#d81b60', marginRight: '5px'}}>{rank}</b>}
+                          {statusText}
+                        </span>
+                      )}
+                      {/* ✅ 隐藏了出品者 */}
                     </div>
 
                     <div className="price-list">
@@ -620,6 +654,7 @@ export default function Home() {
               <p><b>ブランド:</b> {activeModalItem['ブランド'] || 'なし'}</p>
               <p><b>カテゴリ:</b> {activeModalItem['大分類'] || ''} &gt; {activeModalItem['中分類'] || ''}</p>
               <p><b>ランク:</b> <span style={{ color: '#f06292', fontWeight: 'bold' }}>{activeModalItem['状態詳細'] || activeModalItem['ランク'] || 'なし'}</span></p>
+              {/* ✅ 这里弹窗依然可以看到箱番和出品者 */}
               <p><b>箱番:</b> {activeModalItem['箱番'] || activeModalItem['商品番号'] || 'なし'}</p>
               <p><b>出品者:</b> {activeModalItem['出品者'] || 'なし'}</p>
               <p><b>大会開催日:</b> {activeModalItem['大会開催日'] || activeModalItem['日付'] || 'なし'}</p>
@@ -634,6 +669,16 @@ export default function Home() {
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>① {activeModalItem['1番手顧客'] || '-'}</span><b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['1番手入札'])}</b></div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}><span>② {activeModalItem['2番手顧客'] || '-'}</span><b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['2番手入札'])}</b></div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}><span>③ {activeModalItem['3番手顧客'] || '-'}</span><b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['3番手入札'])}</b></div>
+                
+                {/* ✅ 新增：在详情底部增加 3个排名的平均值 */}
+                {calculateAvgBid(activeModalItem['1番手入札'], activeModalItem['2番手入札'], activeModalItem['3番手入札']) > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #f8bbd0', color: '#d81b60' }}>
+                    <span>📈 トップ3平均</span>
+                    <b style={{ marginLeft: 'auto', fontSize: '13px' }}>
+                      {formatPrice(calculateAvgBid(activeModalItem['1番手入札'], activeModalItem['2番手入札'], activeModalItem['3番手入札']))}
+                    </b>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -671,18 +716,14 @@ export default function Home() {
         .checkbox-wrapper:hover { transform: scale(1.1); border-color: #42a5f5; }
         .checkbox-wrapper input { cursor: pointer; transform: scale(1.3); margin: 0; pointer-events: none; }
         
-        .brand-badge { position: absolute; top: 12px; left: 45px; background: rgba(255, 255, 255, 0.9); padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: bold; color: var(--text-main); border: 1px solid var(--border-color); backdrop-filter: blur(4px); z-index: 10; }
-        
         .item-card img { width: 100%; height: 180px; object-fit: cover; border-radius: 8px; background: #fdfdfd; margin-bottom: 10px; }
-        .tag-box { background: #e0e0e0; color: #333; padding: 3px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; font-family: monospace; }
         .tag-date { background: #fce4ec; color: #d81b60; padding: 3px 6px; border-radius: 4px; font-size: 11px; font-weight: bold; border: 1px solid #f8bbd0; }
         
         .item-info { padding: 5px; display: flex; flex-direction: column; flex: 1; }
-        .item-cat { font-size: 11px; color: var(--primary-hover); font-weight: bold; }
-        .item-feat { font-size: 13px; margin: 8px 0; height: 3em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.5; color: var(--text-main); }
+        .item-cat { font-size: 11px; color: var(--primary-hover); font-weight: bold; margin-bottom: 4px; }
+        .item-feat { font-size: 13px; margin: 4px 0 8px 0; height: 3em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.5; color: var(--text-main); }
         .tags-container { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; font-size: 11px; margin-top: auto; }
-        .tag-rank { background: #fff0f5; color: #d81b60; padding: 3px 6px; border-radius: 4px; font-weight: bold; border: 1px solid #f8bbd0; }
-        .tag-normal { background: #f5f5f5; color: #666; padding: 3px 6px; border-radius: 4px; max-w: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .tag-rank { background: #fff0f5; color: #d81b60; padding: 4px 8px; border-radius: 4px; border: 1px solid #f8bbd0; width: fit-content; line-height: 1.3; }
         .price-list { margin-top: 8px; border-top: 1px dashed var(--border-color); padding-top: 8px; }
         .price-row { display: flex; justify-content: space-between; align-items: center; }
         .label { font-size: 12px; color: var(--text-muted); }
