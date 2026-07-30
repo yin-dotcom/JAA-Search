@@ -36,7 +36,7 @@ export default function Home() {
   const [selectedMainCat, setSelectedMainCat] = useState('ALL');
   const [selectedSubCat, setSelectedSubCat] = useState('ALL');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
-  const [selectedMethod, setSelectedMethod] = useState('ALL'); // ✅ 新增：開催方法(入札/手競り)
+  const [selectedMethod, setSelectedMethod] = useState('ALL'); 
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -64,10 +64,9 @@ export default function Home() {
     return !isNaN(num) && num > 0 ? `¥${num.toLocaleString()}` : strVal;
   };
 
-  // ✅ 新增：状态文字智能分离器（分离字母Rank和后续文字）
+  // ✅ 状态文字智能分离器（分离字母Rank和后续文字）
   const parseStatus = (statusStr: string) => {
     if (!statusStr) return { rank: '', text: '' };
-    // 匹配 S, SA, A-, B+, BC 等开头的级别，然后截取后续文本
     const match = statusStr.match(/^([SABCD][A-Z]?[-+]?)(?:\s+|・| )*(.*)$/i);
     if (match) {
       return { rank: match[1].toUpperCase(), text: match[2].trim() };
@@ -75,7 +74,7 @@ export default function Home() {
     return { rank: '', text: statusStr.trim() };
   };
 
-  // ✅ 新增：计算前三入札的平均值
+  // ✅ 计算前三入札的平均值
   const calculateAvgBid = (i1: any, i2: any, i3: any) => {
     const p1 = extractSortPrice(i1);
     const p2 = extractSortPrice(i2);
@@ -159,7 +158,6 @@ export default function Home() {
         else if (selectedStatus === 'S') query = query.not('状態詳細', 'ilike', '%SA%');
       }
 
-      // ✅ 识别大会举办日里面的手竞/入札类型
       if (selectedMethod !== 'ALL') {
         query = query.ilike('大会開催日', `%${selectedMethod}%`);
       }
@@ -489,7 +487,6 @@ export default function Home() {
               {["ALL", "S", "SA", "A", "AB", "B", "BC", "C", "D"].map(status => <option key={status} value={status}>{status}</option>)}
             </select>
           </div>
-          {/* ✅ 新增：開催方法 筛选 */}
           <div className="filter-item">
             <span>開催方法:</span>
             <select value={selectedMethod} onChange={(e) => { setSelectedMethod(e.target.value); setCurrentPage(1); }}>
@@ -540,11 +537,10 @@ export default function Home() {
               const feature = item['特徴'] || item['商品名'] || '-';
               
               const rawStatus = item['状態詳細'] || item['ランク'] || '';
-              // ✅ 智能分离字母 Rank 和文字详情
+              // ✅ 解析 Rank 和文字状态
               const { rank, text: statusText } = parseStatus(rawStatus);
 
               const eventDate = item['大会開催日'] || item['日付'] || '';
-
               const ourSashine = formatPrice(item['自社指値'] || item['指値2'] || item['指値']);
               const imgUrl = item['画像URL'] || 'https://via.placeholder.com/400x300?text=No+Image';
 
@@ -554,6 +550,11 @@ export default function Home() {
               const c2Bid = formatPrice(item['2番手入札']);
               const c3Name = item['3番手顧客'] || '';
               const c3Bid = formatPrice(item['3番手入札']);
+
+              // ✅ 修正条件：只要有价格或者名字，这一行就在卡片上显示
+              const showC1 = c1Name || item['1番手入札'];
+              const showC2 = c2Name || item['2番手入札'];
+              const showC3 = c3Name || item['3番手入札'];
 
               const isSelected = selectedItemsGlobal.some(s => s.id === item.id);
 
@@ -576,33 +577,24 @@ export default function Home() {
                   >
                     <input type="checkbox" checked={isSelected} readOnly />
                   </div>
-
-                  {/* ✅ 已移除图片悬浮的 brand-badge */}
                   
                   <img src={imgUrl} alt={brand} loading="lazy" onError={(e) => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/400x300?text=No+Image'; }}/>
                   
                   <div className="item-info">
                     <div style={{ display: 'flex', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' }}>
-                      {/* ✅ 隐藏了箱番，大会開催日保留粉色标 */}
                       {eventDate && <span className="tag-date">🗓 {eventDate}</span>}
                     </div>
 
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      {/* ✅ 品牌名和中分类合并显示在此处 */}
                       <span className="item-cat">{brand !== '不明' ? `${brand} / ` : ''}{subCategory}</span>
                     </div>
 
                     <div className="item-feat" title={feature}>{feature}</div>
 
                     <div className="tags-container">
-                      {/* ✅ 状态分开显示：字母 Rank 红色加粗，文字普通显示 */}
-                      {(rank || statusText) && (
-                        <span className="tag-rank">
-                          {rank && <b style={{color: '#d81b60', marginRight: '5px'}}>{rank}</b>}
-                          {statusText}
-                        </span>
-                      )}
-                      {/* ✅ 隐藏了出品者 */}
+                      {/* ✅ 列表中也将 Rank 和 状态文字分拆为完全独立的两个标签 */}
+                      {rank && <span className="tag-rank">{rank}</span>}
+                      {statusText && <span className="tag-status">{statusText}</span>}
                     </div>
 
                     <div className="price-list">
@@ -612,11 +604,11 @@ export default function Home() {
                       </div>
                     </div>
 
-                    {(c1Name || c2Name || c3Name) && (
+                    {(showC1 || showC2 || showC3) && (
                       <div className="bid-list-card">
-                        {c1Name && <div className="bid-row"><span className="bid-user">① {c1Name}</span><span className="bid-val">{c1Bid}</span></div>}
-                        {c2Name && <div className="bid-row"><span className="bid-user">② {c2Name}</span><span className="bid-val">{c2Bid}</span></div>}
-                        {c3Name && <div className="bid-row"><span className="bid-user">③ {c3Name}</span><span className="bid-val">{c3Bid}</span></div>}
+                        {showC1 && <div className="bid-row"><span className="bid-user">① {c1Name}</span><span className="bid-val">{c1Bid}</span></div>}
+                        {showC2 && <div className="bid-row"><span className="bid-user">② {c2Name}</span><span className="bid-val">{c2Bid}</span></div>}
+                        {showC3 && <div className="bid-row"><span className="bid-user">③ {c3Name}</span><span className="bid-val">{c3Bid}</span></div>}
                       </div>
                     )}
                   </div>
@@ -650,37 +642,67 @@ export default function Home() {
               onError={(e) => { (e.target as HTMLImageElement).src = 'https://via.placeholder.com/400x300?text=No+Image'; }}
             />
             <div className="modal-title">{activeModalItem['特徴'] || activeModalItem['商品名'] || "無題の商品"}</div>
-            <div className="modal-details">
-              <p><b>ブランド:</b> {activeModalItem['ブランド'] || 'なし'}</p>
-              <p><b>カテゴリ:</b> {activeModalItem['大分類'] || ''} &gt; {activeModalItem['中分類'] || ''}</p>
-              <p><b>ランク:</b> <span style={{ color: '#f06292', fontWeight: 'bold' }}>{activeModalItem['状態詳細'] || activeModalItem['ランク'] || 'なし'}</span></p>
-              {/* ✅ 这里弹窗依然可以看到箱番和出品者 */}
-              <p><b>箱番:</b> {activeModalItem['箱番'] || activeModalItem['商品番号'] || 'なし'}</p>
-              <p><b>出品者:</b> {activeModalItem['出品者'] || 'なし'}</p>
-              <p><b>大会開催日:</b> {activeModalItem['大会開催日'] || activeModalItem['日付'] || 'なし'}</p>
+            
+            {/* ✅ 弹窗中动态提取 Rank 与状态 */}
+            {(() => {
+              const rawModalStatus = activeModalItem['状態詳細'] || activeModalItem['ランク'] || '';
+              const { rank: modalRank, text: modalStatusText } = parseStatus(rawModalStatus);
               
-              <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px dashed #fce4ec' }}>
-                <p><b>指値:</b> {formatPrice(activeModalItem['指値'])}</p>
-                <p><b>自社指値:</b> <span style={{ color: '#e74c3c', fontWeight: 'bold', fontSize: '15px' }}>{formatPrice(activeModalItem['自社指値'] || activeModalItem['指値2'] || activeModalItem['指値'])}</span></p>
-                <p><b>売価予想:</b> {activeModalItem['売価予想'] || '-'}</p>
-              </div>
+              return (
+                <div className="modal-details">
+                  <p><b>ブランド:</b> {activeModalItem['ブランド'] || 'なし'}</p>
+                  <p><b>カテゴリ:</b> {activeModalItem['大分類'] || ''} &gt; {activeModalItem['中分類'] || ''}</p>
+                  
+                  {/* ✅ 在弹窗中分开显示两行：Rank单独一行加粗粉色，状态详细另外一行 */}
+                  <p><b>ランク:</b> {modalRank ? <span style={{ color: '#f06292', fontWeight: 'bold' }}>{modalRank}</span> : 'なし'}</p>
+                  {modalStatusText && <p><b>状態詳細:</b> {modalStatusText}</p>}
 
-              <div style={{ marginTop: '10px', padding: '8px', background: '#fff0f5', borderRadius: '8px', fontSize: '12px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>① {activeModalItem['1番手顧客'] || '-'}</span><b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['1番手入札'])}</b></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}><span>② {activeModalItem['2番手顧客'] || '-'}</span><b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['2番手入札'])}</b></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}><span>③ {activeModalItem['3番手顧客'] || '-'}</span><b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['3番手入札'])}</b></div>
-                
-                {/* ✅ 新增：在详情底部增加 3个排名的平均值 */}
-                {calculateAvgBid(activeModalItem['1番手入札'], activeModalItem['2番手入札'], activeModalItem['3番手入札']) > 0 && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #f8bbd0', color: '#d81b60' }}>
-                    <span>📈 トップ3平均</span>
-                    <b style={{ marginLeft: 'auto', fontSize: '13px' }}>
-                      {formatPrice(calculateAvgBid(activeModalItem['1番手入札'], activeModalItem['2番手入札'], activeModalItem['3番手入札']))}
-                    </b>
+                  <p><b>箱番:</b> {activeModalItem['箱番'] || activeModalItem['商品番号'] || 'なし'}</p>
+                  <p><b>出品者:</b> {activeModalItem['出品者'] || 'なし'}</p>
+                  <p><b>大会開催日:</b> {activeModalItem['大会開催日'] || activeModalItem['日付'] || 'なし'}</p>
+                  
+                  <div style={{ marginTop: '12px', paddingTop: '12px', borderTop: '1px dashed #fce4ec' }}>
+                    <p><b>指値:</b> {formatPrice(activeModalItem['指値'])}</p>
+                    <p><b>自社指値:</b> <span style={{ color: '#e74c3c', fontWeight: 'bold', fontSize: '15px' }}>{formatPrice(activeModalItem['自社指値'] || activeModalItem['指値2'] || activeModalItem['指値'])}</span></p>
+                    <p><b>売価予想:</b> {activeModalItem['売価予想'] || '-'}</p>
                   </div>
-                )}
-              </div>
-            </div>
+
+                  <div style={{ marginTop: '10px', padding: '8px', background: '#fff0f5', borderRadius: '8px', fontSize: '12px' }}>
+                    
+                    {/* ✅ 弹窗里的买家信息：如果没有名字就留空，不再显示横杠 */}
+                    {(activeModalItem['1番手顧客'] || activeModalItem['1番手入札']) && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>① {activeModalItem['1番手顧客'] || ''}</span>
+                        <b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['1番手入札'])}</b>
+                      </div>
+                    )}
+                    
+                    {(activeModalItem['2番手顧客'] || activeModalItem['2番手入札']) && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}>
+                        <span>② {activeModalItem['2番手顧客'] || ''}</span>
+                        <b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['2番手入札'])}</b>
+                      </div>
+                    )}
+                    
+                    {(activeModalItem['3番手顧客'] || activeModalItem['3番手入札']) && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}>
+                        <span>③ {activeModalItem['3番手顧客'] || ''}</span>
+                        <b style={{ marginLeft: 'auto' }}>{formatPrice(activeModalItem['3番手入札'])}</b>
+                      </div>
+                    )}
+                    
+                    {calculateAvgBid(activeModalItem['1番手入札'], activeModalItem['2番手入札'], activeModalItem['3番手入札']) > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', paddingTop: '8px', borderTop: '1px dashed #f8bbd0', color: '#d81b60' }}>
+                        <span>📈 トップ3平均</span>
+                        <b style={{ marginLeft: 'auto', fontSize: '13px' }}>
+                          {formatPrice(calculateAvgBid(activeModalItem['1番手入札'], activeModalItem['2番手入札'], activeModalItem['3番手入札']))}
+                        </b>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -723,7 +745,11 @@ export default function Home() {
         .item-cat { font-size: 11px; color: var(--primary-hover); font-weight: bold; margin-bottom: 4px; }
         .item-feat { font-size: 13px; margin: 4px 0 8px 0; height: 3em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.5; color: var(--text-main); }
         .tags-container { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; font-size: 11px; margin-top: auto; }
-        .tag-rank { background: #fff0f5; color: #d81b60; padding: 4px 8px; border-radius: 4px; border: 1px solid #f8bbd0; width: fit-content; line-height: 1.3; }
+        
+        /* ✅ 新增：在外部卡片里分离的 Rank和状态 的独立 CSS 样式 */
+        .tag-rank { background: #fff0f5; color: #d81b60; padding: 4px 8px; border-radius: 4px; border: 1px solid #f8bbd0; font-weight: bold; width: fit-content; line-height: 1.3; }
+        .tag-status { background: #f5f5f5; color: #4a4a4a; padding: 4px 8px; border-radius: 4px; border: 1px solid #e0e0e0; width: fit-content; line-height: 1.3; }
+        
         .price-list { margin-top: 8px; border-top: 1px dashed var(--border-color); padding-top: 8px; }
         .price-row { display: flex; justify-content: space-between; align-items: center; }
         .label { font-size: 12px; color: var(--text-muted); }
