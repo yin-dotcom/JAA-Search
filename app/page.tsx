@@ -40,7 +40,6 @@ export default function Home() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  // ✅ 默认显示 100 件
   const [itemsPerPage, setItemsPerPage] = useState(100);
   const [currentPage, setCurrentPage] = useState(1);
   const [priceSortState, setPriceSortState] = useState<'none' | 'asc' | 'desc'>('none');
@@ -65,17 +64,17 @@ export default function Home() {
     return !isNaN(num) && num > 0 ? `¥${num.toLocaleString()}` : strVal;
   };
 
-  // 状态文字智能分离器
+  // ✅ 【核心修复】智能分离器升级：完美识别 SA-A 等带有短横线的纯字母组合
   const parseStatus = (statusStr: string) => {
     if (!statusStr) return { rank: '', text: '' };
-    const match = statusStr.match(/^([SABCD][A-Z]?[-+]?)(?:\s+|・| )*(.*)$/i);
+    // 匹配如 S, A-, SA-A 等纯字母或带有连字符、加减号的完整 Rank 字符串
+    const match = statusStr.match(/^([NSABCD][A-Z]*(?:-[A-Z]+)?[-+]?)(?:\s+|・| )*(.*)$/i);
     if (match) {
       return { rank: match[1].toUpperCase(), text: match[2].trim() };
     }
     return { rank: '', text: statusStr.trim() };
   };
 
-  // 计算前三入札的平均值
   const calculateAvgBid = (i1: any, i2: any, i3: any) => {
     const p1 = extractSortPrice(i1);
     const p2 = extractSortPrice(i2);
@@ -496,7 +495,6 @@ export default function Home() {
               <option value="手競り">手競り</option>
             </select>
           </div>
-          {/* ✅ 这里的下拉选项已经修改为 100, 500, 1000 */}
           <div className="filter-item">
             <span>表示件数:</span>
             <select value={itemsPerPage} onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
