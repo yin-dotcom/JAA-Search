@@ -69,14 +69,11 @@ export default function Home() {
     if (!statusStr) return { rank: '', text: '' };
     const safeStr = statusStr.trim();
 
-    // 匹配开头可选的ヴィン/ヴィンテージ，以及后面的英文字母和符号
-    // 使用 ^ 限定从字符串头部开始匹配
     const rankRegex = /^(?:ヴィン(?:テージ)?\s*)?[a-zA-Zａ-ｚＡ-Ｚ\+\-\~\～\＋\－]+(?:\s+[a-zA-Zａ-ｚＡ-Ｚ\+\-\~\～\＋\－]+)*/i;
     const match = safeStr.match(rankRegex);
 
     if (match) {
       const rank = match[0].trim();
-      // 使用 substring 安全地剔除头部匹配到的 Rank，保留后面的所有描述文本
       const text = safeStr.substring(match[0].length).replace(/^[・\s]+|[・\s]+$/g, '').trim();
       return { rank: rank.toUpperCase(), text };
     }
@@ -511,6 +508,14 @@ export default function Home() {
               <option value="500">500件</option>
               <option value="1000">1000件</option>
             </select>
+          </div>
+          
+          {/* ✅ 这里把时间范围补回来了！ */}
+          <div className="filter-item">
+            <span>開催期間:</span>
+            <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }} />
+            <span>〜</span>
+            <input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setCurrentPage(1); }} />
           </div>
 
           <div className="filter-item" style={{ marginLeft: 'auto', gap: '10px' }}>
