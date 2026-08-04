@@ -37,6 +37,9 @@ export default function Home() {
   const [selectedSubCat, setSelectedSubCat] = useState('ALL');
   const [selectedStatus, setSelectedStatus] = useState('ALL');
   const [selectedMethod, setSelectedMethod] = useState('ALL'); 
+  // ✅ 追加: 日程のフィルター状態
+  const [selectedVenue, setSelectedVenue] = useState('ALL');
+  
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -168,6 +171,13 @@ export default function Home() {
         query = query.ilike('大会開催日', `%${selectedMethod}%`);
       }
       
+      // ✅ 追加: 日程(前期/後期/大阪) の条件
+      if (selectedVenue !== 'ALL') {
+        if (selectedVenue === '前期') query = query.ilike('大会開催日', '%12%');
+        else if (selectedVenue === '後期') query = query.ilike('大会開催日', '%28%');
+        else if (selectedVenue === '大阪') query = query.ilike('大会開催日', '%16%');
+      }
+      
       if (startDate) {
         const dbStartDate = startDate.substring(2).replace(/-/g, '');
         query = query.gte('大会開催日', dbStartDate);
@@ -201,9 +211,10 @@ export default function Home() {
     }
   };
 
+  // ✅ 追加: selectedVenue を useEffect の依存配列に追加
   useEffect(() => {
     fetchRealData();
-  }, [ activeSearchTerm, selectedMainCat, selectedSubCat, selectedStatus, selectedMethod, startDate, endDate, currentPage, itemsPerPage, priceSortState, dateSortState ]);
+  }, [ activeSearchTerm, selectedMainCat, selectedSubCat, selectedStatus, selectedMethod, selectedVenue, startDate, endDate, currentPage, itemsPerPage, priceSortState, dateSortState ]);
 
   const executeSearch = () => {
     setActiveSearchTerm(typedSearchTerm);
@@ -501,6 +512,18 @@ export default function Home() {
               <option value="手競り">手競り</option>
             </select>
           </div>
+          
+          {/* ✅ 追加: 日程のフィルター UI */}
+          <div className="filter-item">
+            <span>日程:</span>
+            <select value={selectedVenue} onChange={(e) => { setSelectedVenue(e.target.value); setCurrentPage(1); }}>
+              <option value="ALL">すべて (ALL)</option>
+              <option value="前期">前期 (12日)</option>
+              <option value="後期">後期 (28日)</option>
+              <option value="大阪">大阪 (16日)</option>
+            </select>
+          </div>
+
           <div className="filter-item">
             <span>表示件数:</span>
             <select value={itemsPerPage} onChange={(e) => { setItemsPerPage(Number(e.target.value)); setCurrentPage(1); }}>
@@ -510,7 +533,6 @@ export default function Home() {
             </select>
           </div>
           
-          {/* ✅ 这里把时间范围补回来了！ */}
           <div className="filter-item">
             <span>開催期間:</span>
             <input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }} />
